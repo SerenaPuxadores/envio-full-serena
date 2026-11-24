@@ -39,7 +39,7 @@ async function iniciar(){ scanInit();
 }
 
 /* ---------- atualização automática (outras pessoas no mesmo envio) ---------- */
-function digitando(){ const a=document.activeElement; return a && (a.id==="fq"||a.id==="mlQ"||a.id==="vQ"||a.dataset?.vq!==undefined||a.tagName==="TEXTAREA"||(a.closest&&a.closest("#uForm"))||a.type==="date"||a.type==="number"); }
+function digitando(){ const a=document.activeElement; return a && (a.id==="fq"||a.id==="mlQ"||a.id==="vQ"||a.id==="parcObs"||a.dataset?.vq!==undefined||a.tagName==="TEXTAREA"||(a.closest&&a.closest("#uForm"))||a.type==="date"||a.type==="number"); }
 setInterval(async()=>{
   if(document.hidden||ocupado||PEND>0||!DB.carregado||(!PREF.token&&!DB.qr)||DB.mobile==="__x") return;
   try{ const mudou=await carregar(false); if(mudou&&!digitando()){ const a=document.activeElement, id=a?.id, val=a?.value; render(); if(id){ const n=document.getElementById(id); if(n){ n.focus(); if(val&&n.value!==undefined&&!n.value) n.value=val; } } } }catch(e){}
@@ -148,6 +148,11 @@ document.addEventListener("click",ev=>{
     case "home": DB.cur=null; DB.lbl=null; break;
     case "abrir": DB.cur=b.dataset.id; DB.lbl=null; DB.qrU=DB.me; break;
     case "concluir": acao(async()=>{ await api("concluir",{id:e.id}); DB.cur=null; },"Tarefa finalizada"); return;
+    case "parc": DB.parcial=e.id; DB.parcObs=""; FOCUS="parcObs"; break;
+    case "parcx": DB.parcial=null; break;
+    case "parcok": { const obs=($("#parcObs")?.value||"").trim(); if(!obs){ const er=$("#parcErr"); if(er) er.hidden=false; $("#parcObs")?.focus(); return; }
+      const falt=itens(e).filter(i=>i.s.status!=="etiquetado").map(i=>({cod:i.cod,nome:nomeCod(i.cod),lab:i.lab,etq:i.etq,status:i.s.status}));
+      acao(async()=>{ await api("concluir",{id:e.id,parcial:true,obs,faltas:falt}); DB.cur=null; DB.parcial=null; DB.parcObs=""; },"Tarefa finalizada"); return; }
     case "qrNovo": acao(async()=>{ await qrLink(e.id,qrU(),true); },"Novo QR gerado"); return;
     case "qrCopiar": qrLink(e.id,qrU()).then(l=>navigator.clipboard.writeText(l)).then(()=>toast("Link copiado."),x=>toast(x?.message||"Não deu para copiar.")); return;
     case "lbl": DB.lbl=b.dataset.cod; DB.lmsg=null; if(sepOf(e,DB.lbl).status==="impresso") FOCUS="lscan"; break;
@@ -222,6 +227,7 @@ document.addEventListener("submit",ev=>{
 });
 document.addEventListener("focusin",ev=>{ if(ev.target.dataset?.vq!==undefined){ ev.target.select(); comboBusca(ev.target); } });
 document.addEventListener("input",ev=>{ if(ev.target.dataset?.vq!==undefined) comboBusca(ev.target);
+  if(ev.target.id==="parcObs"){ DB.parcObs=ev.target.value; const er=$("#parcErr"); if(er) er.hidden=true; return; }
   if(ev.target.id==="vQ"){ DB.vq=ev.target.value; DB.vpg=1; const pos=ev.target.selectionStart; render(); const n=$("#vQ"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } return; }
   if(ev.target.id==="mlQ"){ DB.mlQ=ev.target.value; DB.pg.mla=1; DB.pg.mlm=1; const pos=ev.target.selectionStart; render(); const n=$("#mlQ"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } return; }
   if(ev.target.id==="fq"){ DB.f.q=ev.target.value; DB.pg.envios=1; $("#elist").innerHTML=gEnviosList(); } });

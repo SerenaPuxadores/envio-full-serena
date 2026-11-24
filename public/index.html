@@ -371,6 +371,8 @@ body.comscan #toast{bottom:96px}
 .mlvis{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.mlvis .mlxls{margin-left:0}
 .mlzer{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
 .vbusca{margin:12px 0;max-width:760px;flex:0 0 auto;width:100%}.vbusca .inp{padding-right:90px}.vbusca .vbcont{position:absolute;right:12px;top:50%;transform:translateY(-50%);white-space:nowrap;font-size:13px}
+.parcbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 14px;border:1px dashed var(--line);border-radius:12px}
+.parc{border-top:4px solid var(--err)}
 </style>
 
 </head>
@@ -1102,6 +1104,18 @@ function xConf(e){
    <div class="acts"><button class="btn btn-dark" data-act="conferir" style="height:52px">Registrar e começar a separação</button></div></div>`;
 }
 
+/* gestor: concluir o envio mesmo com itens que não foram etiquetados */
+function xParcial(e,its){
+  const falt=its.filter(i=>i.s.status!=="etiquetado");
+  if(DB.parcial!==e.id) return `<div class="parcbar"><span class="muted">${falt.length} ${falt.length===1?"item ainda não foi etiquetado":"itens ainda não foram etiquetados"}.</span><button class="lnkbtn" data-act="parc">Concluir com itens faltantes…</button></div>`;
+  return `<div class="panel parc" role="region" aria-labelledby="parcT"><span class="eyebrow">Concluir com faltas</span><h3 id="parcT">Estes itens vão ficar de fora do envio</h3>
+    <div class="tbox"><table class="t"><thead><tr><th>Produto</th><th>Situação</th><th class="r">Etiquetas coladas</th></tr></thead><tbody>
+    ${falt.map(i=>`<tr><td><b class="mono">${esc(i.cod)}</b> ${esc(nomeCod(i.cod))}</td><td><span class="tag ${(ST[i.s.status]||["",""])[1]}">${esc((ST[i.s.status]||[i.s.status])[0])}</span>${i.s.resp?` <span class="t2">${esc(nomeU(i.s.resp))}</span>`:""}</td><td class="r num">${n0(i.lab)}/${n0(i.etq)}</td></tr>`).join("")}
+    </tbody></table></div>
+    <div class="fld" style="max-width:640px"><label for="parcObs">Por que o envio vai sem esses itens?</label><input class="inp" id="parcObs" placeholder="Ex.: sem estoque físico; entram no próximo envio" value="${esc(DB.parcObs||"")}"></div>
+    <span class="err" id="parcErr" hidden>Escreva o motivo para concluir.</span>
+    <div class="acts"><button class="btn btn-dark" data-act="parcok">Concluir envio com ${falt.length} ${falt.length===1?"item faltante":"itens faltantes"}</button><button class="btn" data-act="parcx">Cancelar</button></div></div>`; }
+
 /* --- bancada do computador --- */
 function xWork(e){
   const its=itens(e); const cnt=k=>its.filter(i=>i.s.status===k).length;
@@ -1122,6 +1136,7 @@ function xWork(e){
     ${fim?`<div class="hero" style="border-top:4px solid var(--gold)"><span class="eyebrow">Tudo pronto</span><h1>Todos os produtos foram etiquetados</h1>
       <p class="hint" style="font-size:15px">${tot(e)} etiquetas coladas em ${conf(e).pecas} peças.${e.motivo?` Diferença registrada: “${esc(e.motivo)}”.`:""}</p>
       <div class="acts"><button class="btn btn-dark" data-act="concluir" style="height:52px">Concluir envio</button></div></div>`:""}
+    ${!fim&&ROLE()==="gestor"?xParcial(e,its):""}
     ${DB.lbl&&its.find(i=>i.cod===DB.lbl)?xLabel(e,its.find(i=>i.cod===DB.lbl)):""}
     <div class="panel"><div class="phd"><h3>${todos?"Produtos do envio":"Seus produtos e itens livres"}</h3>${ROLE()==="gestor"?`<label class="muted vtodos"><input type="checkbox" id="verTodos" ${todos?"checked":""}> Ver itens de todos</label>`:""}</div>
       <div class="irow ihead" aria-hidden="true"><span>Produto</span><span class="c">Kits</span><span class="c">Unitário</span><span class="r">Situação</span></div>
@@ -1332,7 +1347,7 @@ async function iniciar(){ scanInit();
 }
 
 /* ---------- atualização automática (outras pessoas no mesmo envio) ---------- */
-function digitando(){ const a=document.activeElement; return a && (a.id==="fq"||a.id==="mlQ"||a.id==="vQ"||a.dataset?.vq!==undefined||a.tagName==="TEXTAREA"||(a.closest&&a.closest("#uForm"))||a.type==="date"||a.type==="number"); }
+function digitando(){ const a=document.activeElement; return a && (a.id==="fq"||a.id==="mlQ"||a.id==="vQ"||a.id==="parcObs"||a.dataset?.vq!==undefined||a.tagName==="TEXTAREA"||(a.closest&&a.closest("#uForm"))||a.type==="date"||a.type==="number"); }
 setInterval(async()=>{
   if(document.hidden||ocupado||PEND>0||!DB.carregado||(!PREF.token&&!DB.qr)||DB.mobile==="__x") return;
   try{ const mudou=await carregar(false); if(mudou&&!digitando()){ const a=document.activeElement, id=a?.id, val=a?.value; render(); if(id){ const n=document.getElementById(id); if(n){ n.focus(); if(val&&n.value!==undefined&&!n.value) n.value=val; } } } }catch(e){}
@@ -1441,6 +1456,11 @@ document.addEventListener("click",ev=>{
     case "home": DB.cur=null; DB.lbl=null; break;
     case "abrir": DB.cur=b.dataset.id; DB.lbl=null; DB.qrU=DB.me; break;
     case "concluir": acao(async()=>{ await api("concluir",{id:e.id}); DB.cur=null; },"Tarefa finalizada"); return;
+    case "parc": DB.parcial=e.id; DB.parcObs=""; FOCUS="parcObs"; break;
+    case "parcx": DB.parcial=null; break;
+    case "parcok": { const obs=($("#parcObs")?.value||"").trim(); if(!obs){ const er=$("#parcErr"); if(er) er.hidden=false; $("#parcObs")?.focus(); return; }
+      const falt=itens(e).filter(i=>i.s.status!=="etiquetado").map(i=>({cod:i.cod,nome:nomeCod(i.cod),lab:i.lab,etq:i.etq,status:i.s.status}));
+      acao(async()=>{ await api("concluir",{id:e.id,parcial:true,obs,faltas:falt}); DB.cur=null; DB.parcial=null; DB.parcObs=""; },"Tarefa finalizada"); return; }
     case "qrNovo": acao(async()=>{ await qrLink(e.id,qrU(),true); },"Novo QR gerado"); return;
     case "qrCopiar": qrLink(e.id,qrU()).then(l=>navigator.clipboard.writeText(l)).then(()=>toast("Link copiado."),x=>toast(x?.message||"Não deu para copiar.")); return;
     case "lbl": DB.lbl=b.dataset.cod; DB.lmsg=null; if(sepOf(e,DB.lbl).status==="impresso") FOCUS="lscan"; break;
@@ -1515,6 +1535,7 @@ document.addEventListener("submit",ev=>{
 });
 document.addEventListener("focusin",ev=>{ if(ev.target.dataset?.vq!==undefined){ ev.target.select(); comboBusca(ev.target); } });
 document.addEventListener("input",ev=>{ if(ev.target.dataset?.vq!==undefined) comboBusca(ev.target);
+  if(ev.target.id==="parcObs"){ DB.parcObs=ev.target.value; const er=$("#parcErr"); if(er) er.hidden=true; return; }
   if(ev.target.id==="vQ"){ DB.vq=ev.target.value; DB.vpg=1; const pos=ev.target.selectionStart; render(); const n=$("#vQ"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } return; }
   if(ev.target.id==="mlQ"){ DB.mlQ=ev.target.value; DB.pg.mla=1; DB.pg.mlm=1; const pos=ev.target.selectionStart; render(); const n=$("#mlQ"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } return; }
   if(ev.target.id==="fq"){ DB.f.q=ev.target.value; DB.pg.envios=1; $("#elist").innerHTML=gEnviosList(); } });

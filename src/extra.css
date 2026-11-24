@@ -225,3 +225,5 @@ body.comscan #toast{bottom:96px}
 .mlvis{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.mlvis .mlxls{margin-left:0}
 .mlzer{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
 .vbusca{margin:12px 0;max-width:760px;flex:0 0 auto;width:100%}.vbusca .inp{padding-right:90px}.vbusca .vbcont{position:absolute;right:12px;top:50%;transform:translateY(-50%);white-space:nowrap;font-size:13px}
+.parcbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 14px;border:1px dashed var(--line);border-radius:12px}
+.parc{border-top:4px solid var(--err)}

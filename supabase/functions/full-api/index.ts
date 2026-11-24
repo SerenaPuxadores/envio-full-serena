@@ -397,9 +397,19 @@ Deno.serve(async (req) => {
       }
       case "concluir": {
         doEnvio(b.id); must(!me.qrEnvio, "Conclua o envio pelo computador.");
-        await q(db.from("full_envios").update({ status: "concluido", updated_at: new Date().toISOString() }).eq("id", b.id).eq("status", "liberado"));
+        const upd: Record<string, unknown> = { status: "concluido", updated_at: new Date().toISOString() };
+        let txt = `${me.nome} concluiu o envio`;
+        if (b.parcial) {
+          must(gestor, "Só o gestor conclui um envio com itens faltantes.");
+          const obs = String(b.obs || "").trim().slice(0, 300); must(obs, "Escreva o motivo para concluir com itens faltantes.", 400);
+          const fs = (Array.isArray(b.faltas) ? b.faltas : []).slice(0, 200).map((f: any) => `${String(f.cod)} (${+f.lab || 0}/${+f.etq || 0} etiquetas)`);
+          const ant = await q(db.from("full_envios").select("motivo").eq("id", b.id).maybeSingle());
+          upd.motivo = [ant?.motivo, `Concluído com ${fs.length} item(ns) faltante(s): ${fs.join(", ")}. Motivo: ${obs}`].filter(Boolean).join(" | ").slice(0, 2000);
+          txt = `${me.nome} concluiu o envio com ${fs.length} item(ns) faltante(s) — ${obs}`;
+        }
+        await q(db.from("full_envios").update(upd).eq("id", b.id).eq("status", "liberado"));
         await q(db.from("full_qr").update({ revogado: true }).eq("envio", b.id));
-        await log(b.id, `${me.nome} concluiu o envio`); return out({ ok: true });
+        await log(b.id, txt); return out({ ok: true });
       }
       case "sep": {
         doEnvio(b.envio);

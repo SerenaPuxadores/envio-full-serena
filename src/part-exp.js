@@ -42,6 +42,18 @@ function xConf(e){
    <div class="acts"><button class="btn btn-dark" data-act="conferir" style="height:52px">Registrar e começar a separação</button></div></div>`;
 }
 
+/* gestor: concluir o envio mesmo com itens que não foram etiquetados */
+function xParcial(e,its){
+  const falt=its.filter(i=>i.s.status!=="etiquetado");
+  if(DB.parcial!==e.id) return `<div class="parcbar"><span class="muted">${falt.length} ${falt.length===1?"item ainda não foi etiquetado":"itens ainda não foram etiquetados"}.</span><button class="lnkbtn" data-act="parc">Concluir com itens faltantes…</button></div>`;
+  return `<div class="panel parc" role="region" aria-labelledby="parcT"><span class="eyebrow">Concluir com faltas</span><h3 id="parcT">Estes itens vão ficar de fora do envio</h3>
+    <div class="tbox"><table class="t"><thead><tr><th>Produto</th><th>Situação</th><th class="r">Etiquetas coladas</th></tr></thead><tbody>
+    ${falt.map(i=>`<tr><td><b class="mono">${esc(i.cod)}</b> ${esc(nomeCod(i.cod))}</td><td><span class="tag ${(ST[i.s.status]||["",""])[1]}">${esc((ST[i.s.status]||[i.s.status])[0])}</span>${i.s.resp?` <span class="t2">${esc(nomeU(i.s.resp))}</span>`:""}</td><td class="r num">${n0(i.lab)}/${n0(i.etq)}</td></tr>`).join("")}
+    </tbody></table></div>
+    <div class="fld" style="max-width:640px"><label for="parcObs">Por que o envio vai sem esses itens?</label><input class="inp" id="parcObs" placeholder="Ex.: sem estoque físico; entram no próximo envio" value="${esc(DB.parcObs||"")}"></div>
+    <span class="err" id="parcErr" hidden>Escreva o motivo para concluir.</span>
+    <div class="acts"><button class="btn btn-dark" data-act="parcok">Concluir envio com ${falt.length} ${falt.length===1?"item faltante":"itens faltantes"}</button><button class="btn" data-act="parcx">Cancelar</button></div></div>`; }
+
 /* --- bancada do computador --- */
 function xWork(e){
   const its=itens(e); const cnt=k=>its.filter(i=>i.s.status===k).length;
@@ -62,6 +74,7 @@ function xWork(e){
     ${fim?`<div class="hero" style="border-top:4px solid var(--gold)"><span class="eyebrow">Tudo pronto</span><h1>Todos os produtos foram etiquetados</h1>
       <p class="hint" style="font-size:15px">${tot(e)} etiquetas coladas em ${conf(e).pecas} peças.${e.motivo?` Diferença registrada: “${esc(e.motivo)}”.`:""}</p>
       <div class="acts"><button class="btn btn-dark" data-act="concluir" style="height:52px">Concluir envio</button></div></div>`:""}
+    ${!fim&&ROLE()==="gestor"?xParcial(e,its):""}
     ${DB.lbl&&its.find(i=>i.cod===DB.lbl)?xLabel(e,its.find(i=>i.cod===DB.lbl)):""}
     <div class="panel"><div class="phd"><h3>${todos?"Produtos do envio":"Seus produtos e itens livres"}</h3>${ROLE()==="gestor"?`<label class="muted vtodos"><input type="checkbox" id="verTodos" ${todos?"checked":""}> Ver itens de todos</label>`:""}</div>
       <div class="irow ihead" aria-hidden="true"><span>Produto</span><span class="c">Kits</span><span class="c">Unitário</span><span class="r">Situação</span></div>
