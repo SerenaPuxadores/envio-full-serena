@@ -95,20 +95,37 @@ function gDet(e){
   ${e.status==="rascunho"?`<div class="acts"><button class="lnkbtn" data-act="excluir" data-id="${e.id}" style="color:var(--err)">Excluir este rascunho</button></div>`:""}
   </div>`;
 }
+/* busca por aproximação: ignora acento e caixa; cada palavra digitada pode bater por trecho,
+   por letras na ordem (ex. "prms" → primus) ou com até 1–2 letras erradas (ex. "primos", "dorado") */
+const normB=s=>String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+function levB(a,b,max){ if(Math.abs(a.length-b.length)>max) return max+1; let p=Array.from({length:b.length+1},(_,i)=>i);
+  for(let i=1;i<=a.length;i++){ const c=[i]; let mn=i; for(let j=1;j<=b.length;j++){ c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1)); if(c[j]<mn) mn=c[j]; } if(mn>max) return max+1; p=c; } return p[b.length]; }
+function notaTermo(t,txt,pals){ if(txt.includes(t)) return 3;
+  const max=t.length>=7?2:t.length>=4?1:0;
+  if(max&&pals.some(w=>levB(t,w,max)<=max||(w.length>t.length&&levB(t,w.slice(0,t.length),max)<=max))) return 2;
+  if(t.length>=3&&pals.some(w=>{ let k=0; for(const ch of w){ if(ch===t[k]) k++; if(k===t.length) return true; } return false; })) return 1;
+  return 0; }
+function buscaAprox(q,txt){ const termos=normB(q).split(/[\s·,;/]+/).filter(Boolean); if(!termos.length) return 1;
+  const t=normB(txt), pals=t.split(/[^a-z0-9]+/).filter(Boolean); let soma=0;
+  for(const x of termos){ const n=notaTermo(x,t,pals); if(!n) return 0; soma+=n; } return soma; }
 function gVinc(){
-  const invs=allAnuncios().sort((a,b)=>(!!V(a.inv).cod)-(!!V(b.inv).cod)||a.titulo.localeCompare(b.titulo));
-  const pend=invs.filter(a=>!V(a.inv).cod).length;
+  const todos=allAnuncios(); const vq=(DB.vq||"").trim();
+  let invs=todos.sort((a,b)=>(!!V(a.inv).cod)-(!!V(b.inv).cod)||a.titulo.localeCompare(b.titulo));
+  if(vq){ invs=invs.map(a=>{ const v=V(a.inv); return {a,n:buscaAprox(vq,[a.inv,a.titulo,a.ref,v.cod,v.cod?nomeCod(v.cod):"sem vinculo"].join(" "))}; }).filter(x=>x.n).sort((x,y)=>y.n-x.n).map(x=>x.a); }
+  const pend=todos.filter(a=>!V(a.inv).cod).length;
   const PG=15, pages=Math.max(1,Math.ceil(invs.length/PG)); DB.vpg=Math.min(Math.max(1,DB.vpg||1),pages);
   const ini=(DB.vpg-1)*PG, pagina=invs.slice(ini,ini+PG);
   return `<div class="hdr"><div><span class="eyebrow">Cadastro único</span><h1>Vínculos anúncio × produto</h1></div></div>
   <p class="hint" style="max-width:72ch">Cada anúncio Full aponta para um código do ERP e diz quantas peças uma etiqueta representa. Quando a etiqueta traz o SKU do ERP o app vincula sozinho; anúncios com “Universal Code” ou SKU diferente do ERP você vincula uma vez e fica salvo. Título “4x …” ou SKU “-010” já sugerem as peças do kit.</p>
   ${pend?`<div class="note warn"><span>${pend} anúncio${pend>1?"s":""} aguardando vínculo.</span></div>`:`<div class="note ok"><span>Todos os anúncios estão vinculados.</span></div>`}
+  <div class="busca2 vbusca"><span aria-hidden="true">${LUPA}</span><input class="inp" id="vQ" placeholder="Buscar anúncio, título, referência, código ou produto do ERP (aceita erros de digitação)" value="${esc(DB.vq||"")}" autocomplete="off" aria-label="Buscar vínculos">${vq?`<small class="muted vbcont">${invs.length} de ${todos.length}</small>`:""}</div>
   <div class="tbox"><table class="t"><thead><tr><th>Anúncio</th><th>Título no ML</th><th>Referência na etiqueta</th><th>Produto ERP</th><th class="r">Peças/etiqueta</th></tr></thead><tbody>
   ${pagina.map(a=>{const v=V(a.inv);return `<tr class="${v.cod?"":"flag"}"><td class="mono">${esc(a.inv)}</td><td>${esc(a.titulo)}</td><td class="mono" style="font-size:12px">${esc(a.ref||"")}</td>
    <td><div class="combo"><input class="inp" data-vq="${esc(a.inv)}" value="${v.cod?esc(v.cod+" · "+nomeCod(v.cod)):""}" placeholder="Buscar por SKU ou descrição…" autocomplete="off" role="combobox" aria-expanded="false" aria-label="Produto ERP de ${esc(a.inv)}"><div class="clist" hidden></div></div></td>
    <td class="r"><input class="inp" type="number" min="1" data-vm="${esc(a.inv)}" value="${v.mult}" style="width:76px;height:40px;font-size:14px" aria-label="Peças por etiqueta de ${esc(a.inv)}"></td></tr>`;}).join("")}
+  ${pagina.length?"":`<tr><td colspan="5" class="muted">Nenhum anúncio encontrado para “${esc(vq)}”.</td></tr>`}
   </tbody></table></div>
-  <div class="pag"><span class="muted">${ini+1}–${Math.min(ini+PG,invs.length)} de ${invs.length} anúncios</span>
+  <div class="pag"><span class="muted">${invs.length?`${ini+1}–${Math.min(ini+PG,invs.length)} de `:""}${invs.length} anúncios</span>
     <div class="acts"><button class="btn btn-sm" data-act="vpg" data-p="${DB.vpg-1}" ${DB.vpg<=1?"disabled":""}>‹ Anterior</button>
     ${Array.from({length:pages},(_,i)=>`<button class="btn btn-sm ${i+1===DB.vpg?"btn-dark":""}" data-act="vpg" data-p="${i+1}" aria-current="${i+1===DB.vpg?"page":"false"}">${i+1}</button>`).join("")}
     <button class="btn btn-sm" data-act="vpg" data-p="${DB.vpg+1}" ${DB.vpg>=pages?"disabled":""}>Próxima ›</button></div></div>`;
