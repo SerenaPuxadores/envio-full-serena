@@ -1,5 +1,5 @@
 /* ===== GESTOR ===== */
-const TABS=[["envios","Envios"],["estoque","Estoque Full"],["vinculos","Vínculos"],["usuarios","Usuários"]];
+const TABS=[["envios","Envios"],["estoque","Estoque Full"],["devolucoes","Devoluções"],["vinculos","Vínculos"],["usuarios","Usuários"]];
 function allAnuncios(){ return [...new Map(DB.envios.flatMap(e=>e.anuncios).map(a=>[a.inv,a])).values()]; }
 function renderGestor(){
   const pend=allAnuncios().filter(a=>!V(a.inv).cod).length;
@@ -8,7 +8,7 @@ function renderGestor(){
     <div style="display:flex;flex-direction:column;gap:4px">${TABS.map(([k,l])=>{ const b=k==="vinculos"?pend:k==="envios"?DB.envios.filter(e=>e.status==="rascunho").length:0;
       return `<button class="navb" data-act="tab" data-t="${k}" aria-current="${DB.tab===k?"page":"false"}"><span>${l}</span>${b?`<span class="badge">${b}</span>`:""}</button>`; }).join("")}</div>
     <div class="navfoot"><button class="navlink" data-act="to-exp">Abrir app da expedição</button><button class="navlink" data-act="logout">Sair</button></div>
-  </nav><main>${DB.tab==="vinculos"?gVinc():DB.tab==="usuarios"?gUsers():DB.tab==="estoque"?gEstoque():gEnvios()}</main></div>`;
+  </nav><main>${DB.tab==="vinculos"?gVinc():DB.tab==="usuarios"?gUsers():DB.tab==="estoque"?gEstoque():DB.tab==="devolucoes"?gDevol():gEnvios()}</main></div>`;
 }
 const PER=[["todos","Todos"],["hoje","Hoje"],["7","7 dias"],["30","30 dias"],["mes","Este mês"],["custom","Personalizado"]];
 const dfmt=t=>new Date(t).toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"2-digit"});

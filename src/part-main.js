@@ -39,7 +39,7 @@ async function iniciar(){ scanInit();
 }
 
 /* ---------- atualização automática (outras pessoas no mesmo envio) ---------- */
-function digitando(){ const a=document.activeElement; return a && (a.id==="fq"||a.id==="mlQ"||a.id==="vQ"||a.id==="parcObs"||a.dataset?.vq!==undefined||a.tagName==="TEXTAREA"||(a.closest&&a.closest("#uForm"))||a.type==="date"||a.type==="number"); }
+function digitando(){ const a=document.activeElement; return a && (a.id==="fq"||a.id==="mlQ"||a.id==="vQ"||a.id==="dvQ"||a.id==="parcObs"||a.dataset?.vq!==undefined||a.tagName==="TEXTAREA"||(a.closest&&a.closest("#uForm"))||a.type==="date"||a.type==="number"); }
 setInterval(async()=>{
   if(document.hidden||ocupado||PEND>0||!DB.carregado||(!PREF.token&&!DB.qr)||DB.mobile==="__x") return;
   try{ const mudou=await carregar(false); if(mudou&&!digitando()){ const a=document.activeElement, id=a?.id, val=a?.value; render(); if(id){ const n=document.getElementById(id); if(n){ n.focus(); if(val&&n.value!==undefined&&!n.value) n.value=val; } } } }catch(e){}
@@ -115,7 +115,11 @@ document.addEventListener("click",ev=>{
   const sep=(acaoNome,cod,extra={},msg="")=>api("sep",{envio:e.id,cod,acao:acaoNome,msg,...extra});
   switch(act){
     case "logout": camDesliga(); api("logout").catch(()=>{}); PREF.token=null; DB.me=null; DB.meObj=null; DB.carregado=false; DB.cur=null; DB.lbl=null; break;
-    case "tab": DB.tab=b.dataset.t; DB.uEdit=null; if(DB.tab==="estoque"&&DB.ml) mlCarregar(); break;
+    case "tab": DB.tab=b.dataset.t; DB.uEdit=null; if(DB.tab==="estoque"&&DB.ml) mlCarregar(); if(DB.tab==="devolucoes"&&DB.dv) dvCarregar(); break;
+    case "dv-sync": dvSincronizar(); return;
+    case "dv-dias": DB.dvDias=+b.dataset.d; DB.pg.dv=1; DB.dvOpen=null; dvCarregar(); break;
+    case "dv-f": DB.dvF=b.dataset.f; DB.pg.dv=1; DB.dvOpen=null; break;
+    case "dv-open": DB.dvOpen=DB.dvOpen===b.dataset.o?null:b.dataset.o; break;
     case "ml-conectar": mlConectar(); return;
     case "ml-recarregar": DB.mlErro=null; DB.ml=null; break;
     case "lblfim": if(e) lblFinaliza(e,b.dataset.cod); break;
@@ -229,6 +233,7 @@ document.addEventListener("submit",ev=>{
 document.addEventListener("focusin",ev=>{ if(ev.target.dataset?.vq!==undefined){ ev.target.select(); comboBusca(ev.target); } });
 document.addEventListener("input",ev=>{ if(ev.target.dataset?.vq!==undefined) comboBusca(ev.target);
   if(ev.target.id==="parcObs"){ DB.parcObs=ev.target.value; const er=$("#parcErr"); if(er) er.hidden=true; return; }
+  if(ev.target.id==="dvQ"){ DB.dvQ=ev.target.value; DB.pg.dv=1; const pos=ev.target.selectionStart; render(); const n=$("#dvQ"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } return; }
   if(ev.target.id==="vQ"){ DB.vq=ev.target.value; DB.vpg=1; const pos=ev.target.selectionStart; render(); const n=$("#vQ"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } return; }
   if(ev.target.id==="mlQ"){ DB.mlQ=ev.target.value; DB.pg.mla=1; DB.pg.mlm=1; const pos=ev.target.selectionStart; render(); const n=$("#mlQ"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } return; }
   if(ev.target.id==="fq"){ DB.f.q=ev.target.value; DB.pg.envios=1; $("#elist").innerHTML=gEnviosList(); } });

@@ -228,3 +228,23 @@ body.comscan #toast{bottom:96px}
 .parcbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 14px;border:1px dashed var(--line);border-radius:12px}
 .parc{border-top:4px solid var(--err)}
 .lconf{margin-top:10px;padding:14px 16px;border-radius:12px;border:2px solid var(--ok,#1D7A46);background:var(--accent-soft);display:grid;gap:6px}.lconf b{font-size:16px}.lconf span{font-size:14px;line-height:1.45}
+
+/* devoluções */
+.dvk{margin-bottom:14px}
+.dv-full{--c:#164C64}.dv-loja{--c:#8A6526}.dv-nao{--c:#7A8B94}.dv-and{--c:#A84B08}.dv-sem{--c:#C9C1B4}
+.tag.dv-full,.tag.dv-loja,.tag.dv-nao,.tag.dv-and,.tag.dv-sem{background:color-mix(in srgb,var(--c) 14%,#fff);color:color-mix(in srgb,var(--c) 85%,#000);white-space:nowrap}
+.sum.dv-k-full{box-shadow:inset 0 3px 0 #164C64}.sum.dv-k-loja{box-shadow:inset 0 3px 0 #8A6526}.sum.dv-k-nao{box-shadow:inset 0 3px 0 #7A8B94}
+.dvchart{margin:8px 0 0}.dvchart figcaption{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+.dvchart svg{width:100%;height:auto;display:block}.dvchart text{font:11px var(--ui,Manrope),sans-serif;fill:var(--muted)}
+.dvchart rect{fill:var(--c)}.dvgrid{stroke:var(--line2);stroke-width:1}
+.dvleg{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--ink2)}.dvleg span{display:inline-flex;align-items:center;gap:6px}.dvleg i{width:10px;height:10px;border-radius:3px;background:var(--c);display:inline-block}
+.dvt .dvrow{cursor:pointer}.dvt .dvrow:hover td,.dvt .dvrow.on td{background:#FAF7F2}.dvtit{max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dvsit{font-size:13px;color:var(--ink2);max-width:260px}.dvchev{color:var(--muted)}
+.dvdet td{background:#FAF7F2;padding:0 14px 16px}
+.dvcard{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.dvinfo{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px 16px;margin:0 0 12px}.dvinfo dt{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}.dvinfo dd{margin:2px 0 0;font-size:14px}
+.dvcard h4{margin:4px 0 8px;font-size:14px}
+.dvtl{list-style:none;margin:0;padding:0 0 0 14px;border-left:2px solid var(--line);display:grid;gap:8px}
+.dvtl li{position:relative;display:grid;grid-template-columns:130px 1fr;gap:10px;font-size:13.5px}
+.dvtl li::before{content:"";position:absolute;left:-20px;top:5px;width:10px;height:10px;border-radius:50%;background:#164C64;border:2px solid #fff}
+.dvtl li.full::before{background:#8A6526}.dvtl time{color:var(--muted);font-variant-numeric:tabular-nums}

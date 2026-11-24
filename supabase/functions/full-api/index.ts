@@ -177,6 +177,87 @@ async function mlSync(diasHist = 0) {
   return { anuncios: linhas.length, ops: nOps };
 }
 
+// ===== Devoluções: reclamações de devolução de vendas Full + entregas não concluídas que voltaram ao Full =====
+const isoD = (x: any) => (x ? new Date(x).toISOString() : null);
+const nao429 = (e: unknown) => { if (e instanceof Erro && e.s === 429) throw e; return null; };
+async function devPedido(a: any, oid: string) {
+  const ord = await mlGet(a, `/orders/${oid}`).catch(nao429); await espera(250);
+  const sid = ord?.shipping?.id; const shp = sid ? await mlGet(a, `/shipments/${sid}`).catch(nao429) : null; if (sid) await espera(250);
+  const it = ord?.order_items?.[0]; const ev: any[] = [];
+  const add = (d: any, t: string, x = "") => { if (d) ev.push({ d: isoD(d), t, x: String(x ?? "") }); };
+  add(ord?.date_created, "venda", it ? `${it.quantity}|${it.unit_price}` : "");
+  const sh = shp?.status_history || {};
+  add(sh.date_shipped, "envio_saiu"); add(sh.date_first_visit, "envio_visita"); add(sh.date_delivered, "envio_entregue"); add(sh.date_not_delivered, "envio_nao_entregue");
+  add(sh.date_returned, "envio_retornou"); add(sh.date_cancelled, "envio_cancelado");
+  add(ord?.cancel_detail?.date, "pedido_cancelado", ord?.cancel_detail?.code || "");
+  return { ord, it, ev, envio: shp?.status || null };
+}
+async function devClaim(a: any, c: any) {
+  const oid = String(c.resource_id);
+  const hist = await mlGet(a, `/post-purchase/v1/claims/${c.id}/status_history`).catch(nao429); await espera(250);
+  const ret = await mlGet(a, `/post-purchase/v2/claims/${c.id}/returns`).catch(nao429); await espera(250);
+  const p = await devPedido(a, oid);
+  const rs = (ret?.shipments || []).find((x: any) => x.type === "return") || ret?.shipments?.[0];
+  const rsh = rs?.shipment_id ? await mlGet(a, `/shipments/${rs.shipment_id}`).catch(nao429) : null; if (rs?.shipment_id) await espera(250);
+  let review: any = null;
+  if (ret?.id && (ret.related_entities || []).includes("reviews")) { review = await mlGet(a, `/post-purchase/v1/returns/${ret.id}/reviews`).catch(nao429); await espera(250); }
+  const destino = rs?.destination?.name || null;
+  const ev = p.ev; const add = (d: any, t: string, x = "") => { if (d) ev.push({ d: isoD(d), t, x: String(x ?? "") }); };
+  for (const h of Array.isArray(hist) ? hist : []) add(h.date, h.stage === "dispute" ? "mediacao" : "reclamacao", `${h.status}|${h.change_by || ""}`);
+  if (ret) add(ret.date_created, "retorno_criado", destino || "");
+  const rh = rsh?.status_history || {};
+  add(rh.date_shipped, "retorno_enviado", destino || ""); add(rh.date_delivered, "retorno_entregue", destino || ""); add(rh.date_not_delivered, "retorno_nao_entregue"); add(rh.date_cancelled, "retorno_cancelado");
+  const cond = (JSON.stringify(review || {}).match(/"product_condition"\s*:\s*"([^"]+)"/) || [])[1] || null;
+  const rdt = (JSON.stringify(review || {}).match(/"date_created"\s*:\s*"([^"]+)"/) || [])[1] || null;
+  if (cond) add(rdt || ret?.last_updated, "revisao", cond);
+  if (c.resolution?.date_created) add(c.resolution.date_created, "resolucao", `${c.resolution.reason || ""}|${(c.resolution.benefited || []).join(",")}`);
+  if (ret?.date_closed) add(ret.date_closed, "retorno_fechado", `${ret.status || ""}|${ret.status_money || ""}`);
+  const qtd = +(ret?.orders?.[0]?.return_quantity ?? c.claimed_quantity ?? p.it?.quantity ?? 1) || 1;
+  return { order_id: oid, claim_id: String(c.id), origem: "claim", claim_status: c.status, resolucao: c.resolution?.reason || null, beneficiado: (c.resolution?.benefited || []).join(",") || null,
+    ret_id: ret?.id ? String(ret.id) : null, ret_status: ret?.status || null, destino, status_money: ret?.status_money || null, ship_status: rsh?.status || rs?.status || null,
+    venda_em: isoD(p.ord?.date_created), devol_em: isoD(c.date_created), fechado_em: isoD(ret?.date_closed || c.resolution?.date_created),
+    item_id: p.it?.item?.id || null, titulo: p.it?.item?.title || null, sku: p.it?.item?.seller_sku || null, qtd, valor: Math.round((+p.it?.unit_price || 0) * qtd * 100) / 100,
+    eventos: ev, review: review ? { condicao: cond, raw: review } : null, raw: { claim: c, ret }, ml_updated: isoD(c.last_updated), updated_at: new Date().toISOString() };
+}
+async function devSync() {
+  const t0 = Date.now(); const a = await mlToken();
+  const desde = a.dev_ate ? new Date(new Date(a.dev_ate).getTime() - 60000).toISOString() : new Date(Date.now() - 150 * 86400000).toISOString();
+  let n = 0, ultimo = a.dev_ate || null, parcial = false;
+  try {
+    fora: for (let off = 0; off < 3000; off += 50) {
+      const j = await mlGet(a, `/post-purchase/v1/claims/search?player_role=respondent&player_user_id=${a.user_id}&type=returns&range=last_updated:after:${encodeURIComponent(desde)}&sort=last_updated:asc&limit=50&offset=${off}`);
+      const cs = j.data || [];
+      for (const c of cs) {
+        if (Date.now() - t0 > 90000) { parcial = true; break fora; }
+        if (c.fulfilled === true) { const row = await devClaim(a, c); await q(db.from("full_ml_devol").upsert(row)); n++; }
+        ultimo = c.last_updated;
+      }
+      if (cs.length < 50) break;
+    }
+    // entregas não concluídas que voltaram ao Full e não têm reclamação de devolução
+    if (!parcial) {
+      const ops = await todas((x, y) => db.from("full_ml_ops").select("ref,data,inv,disp").eq("tipo", "sale_delivery_cancelation").gte("data", new Date(Date.now() - 150 * 86400000).toISOString()).order("data").range(x, y));
+      const porPed = new Map<string, any>(); for (const o of ops) { const v = o.ref?.[0]?.value; if (v && !porPed.has(String(v))) porPed.set(String(v), o); }
+      const ids = [...porPed.keys()];
+      const ja = new Set<string>(); for (let i = 0; i < ids.length; i += 200) (await q(db.from("full_ml_devol").select("order_id").in("order_id", ids.slice(i, i + 200)))).forEach((r: any) => ja.add(r.order_id));
+      for (const oid of ids.filter((x) => !ja.has(x))) {
+        if (Date.now() - t0 > 90000) { parcial = true; break; }
+        const op = porPed.get(oid); const p = await devPedido(a, oid);
+        const qtd = Math.max(1, +op.disp || 1);
+        await q(db.from("full_ml_devol").upsert({ order_id: oid, claim_id: null, origem: "nao_entregue", claim_status: null, resolucao: null, beneficiado: null, ret_id: null, ret_status: "nao_entregue",
+          destino: "warehouse", status_money: null, ship_status: p.envio, venda_em: isoD(p.ord?.date_created), devol_em: isoD(op.data), fechado_em: isoD(op.data),
+          item_id: p.it?.item?.id || null, titulo: p.it?.item?.title || null, sku: p.it?.item?.seller_sku || null, qtd, valor: Math.round((+p.it?.unit_price || 0) * qtd * 100) / 100,
+          eventos: p.ev, review: null, raw: { op, pedido: !!p.ord }, ml_updated: isoD(op.data), updated_at: new Date().toISOString() }));
+        n++;
+      }
+    }
+  } catch (e) {
+    if (e instanceof Erro && e.s === 429) parcial = true; else { await db.from("full_ml_auth").update({ dev_ate: ultimo, dev_msg: e instanceof Error ? e.message : String(e) }).eq("id", 1); throw e; }
+  }
+  await q(db.from("full_ml_auth").update({ dev_ate: ultimo, dev_sync: new Date().toISOString(), dev_msg: null }).eq("id", 1));
+  return { devolucoes: n, parcial };
+}
+
 async function rev() {
   // inclui o Picking: cadastrar EAN ou local lá atualiza as telas daqui em poucos segundos
   const [a, b, c, d] = await Promise.all([
@@ -258,7 +339,7 @@ Deno.serve(async (req) => {
     if (!me) throw new Erro(req.headers.get("x-full-qr") ? "Link inválido ou expirado." : "Sessão expirada. Entre de novo.", 401);
     const gestor = me.role === "gestor";
     const doEnvio = (id: string) => { must(!me.qrEnvio || me.qrEnvio === id, "Este link não é deste envio."); };
-    if (me.role === "sistema") must(op === "ml_sync", "Operação não permitida.");
+    if (me.role === "sistema") must(op === "ml_sync" || op === "dev_sync", "Operação não permitida.");
 
     switch (op) {
       case "logout": await db.from("full_sessions").delete().eq("token", req.headers.get("x-full-token") || ""); return out({ ok: true });
@@ -344,6 +425,25 @@ Deno.serve(async (req) => {
         must(gestor || me.role === "sistema", "Só o gestor sincroniza.");
         if (me.role === "sistema") { const a = await mlAuth(); if (!mlLigado(a)) return out({ ok: true, pulado: true }); if (a?.ultima_sync && Date.now() - new Date(a.ultima_sync).getTime() < 90000) return out({ ok: true, pulado: true }); }
         const r = await mlSync(Math.max(0, +b.dias || 0)); return out({ ok: true, ...r });
+      }
+      case "dev_sync": {
+        must(gestor || me.role === "sistema", "Só o gestor sincroniza.");
+        if (me.role === "sistema") { const a = await mlAuth(); if (!mlLigado(a)) return out({ ok: true, pulado: true }); }
+        return out({ ok: true, ...(await devSync()) });
+      }
+      case "dev_painel": {
+        must(gestor && !me.qrEnvio, "Só o gestor vê as devoluções.");
+        const dias = Math.min(365, Math.max(1, +b.dias || 30));
+        const desde = new Date(Date.now() - dias * 86400000).toISOString();
+        const [a, rows, est, res] = await Promise.all([
+          mlAuth(), todas((x, y) => db.from("full_ml_devol").select("order_id,claim_id,origem,claim_status,resolucao,beneficiado,ret_status,destino,status_money,ship_status,venda_em,devol_em,fechado_em,item_id,titulo,sku,qtd,valor,eventos,review->condicao").gte("devol_em", desde).order("devol_em", { ascending: false }).range(x, y)),
+          todas((x, y) => db.from("full_ml_estoque").select("inv,item_id,titulo,sku,total,disponivel,indisponivel,detalhe").gt("indisponivel", 0).order("inv").range(x, y)),
+          q(db.rpc("full_ml_resumo_json", { p_desde: desde })),
+        ]);
+        const ids = rows.map((r: any) => r.order_id); const ops: any[] = [];
+        for (let i = 0; i < ids.length; i += 150) ops.push(...await q(db.from("full_ml_ops").select("data,tipo,disp,indisp,inv,ref->0->>value").in("tipo", ["sale_return", "sale_delivery_cancelation", "quarantine_reservation", "quarantine_restock"]).in("ref->0->>value", ids.slice(i, i + 150))));
+        const vendidas = (res || []).filter((x: any) => x.tipo === "sale_confirmation").reduce((t: number, x: any) => t + Math.abs(+x.disp || 0), 0);
+        return out({ dias, conectado: mlLigado(a), dev_sync: a?.dev_sync || null, dev_msg: a?.dev_msg || null, devolucoes: rows, ops, indisp: est, vendidas });
       }
       case "ml_desconectar": {
         must(gestor && !me.qrEnvio, "Só o gestor desconecta.");
