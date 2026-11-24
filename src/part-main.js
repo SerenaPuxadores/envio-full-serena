@@ -220,7 +220,8 @@ document.addEventListener("submit",ev=>{
     if(mult===v.mult){ DB.edAn=null; render(); return; }
     acao(async()=>{ await api("vinc",{inv,cod:v.cod,mult}); DB.edAn=null; },"Peças por kit atualizadas"); return; }
   if(f.id==="mlDiasF"){ ev.preventDefault(); const d=Math.min(365,Math.max(1,parseInt($("#mlDias").value,10)||30)); DB.mlDias=d; mlCarregar(); return; }
-  if(f.id==="lblForm"){ ev.preventDefault(); lblScan(e,$("#lscan").value); FOCUS=DB.lbl?"lscan":null; render(); }
+  if(f.id==="lblForm"){ ev.preventDefault(); lblScan(e,$("#lscan").value);
+    FOCUS=DB.lbl?"lscan":null; render(); } // o foco fica no campo: um bipe a mais não confirma sem querer
 
   else if(f.id==="uForm"){ ev.preventDefault(); const d={login:$("#uLogin").value.trim().toLowerCase(),nome:$("#uNome").value.trim(),role:$("#uRole").value,modo:$("#uModo").value,pin:$("#uPin").value.trim(),ativo:$("#uAtivo").checked};
     acao(async()=>{ await api("user",d); DB.uEdit=null; },"Usuário salvo."); }

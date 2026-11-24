@@ -122,7 +122,10 @@ function xLabel(e,it){
     <div class="plan">${it.anuncios.map(row).join("")}</div>
     ${imp?`<form class="scan" id="lblForm" autocomplete="off"><input class="inp" id="lscan" placeholder="Bipe cada etiqueta depois de colar" aria-label="Código da etiqueta"><button class="btn btn-dark" type="submit">OK</button></form>
       ${DB.lmsg?`<div class="lmsg ${DB.lmsg.ok?"ok":"err"}">${esc(DB.lmsg.t)}</div>`:""}
-      ${lblCompleto(it,s)?`<div class="lmsg ok">Todas as etiquetas foram bipadas. <button class="btn btn-sm btn-dark" data-act="lblfim" data-cod="${it.cod}">Concluir etiquetagem</button></div>`:""}`:""}
+      ${lblCompleto(it,s)?`<div class="lconf" role="alertdialog" aria-labelledby="lconfT" aria-describedby="lconfD">
+        <b id="lconfT">Conferência completa</b>
+        <span id="lconfD">${it.anuncios.map(x=>`${n0((s.lab||{})[x.inv]||0)}/${n0(x.etiquetas)} ${x.mult===1?"etiquetas de unidade":"etiquetas de kit"}`).join(" · ")} bipadas em ${esc(nomeCod(it.cod))}. Confira se todas as peças estão etiquetadas e confirme para concluir o item.</span>
+        <div class="acts"><button class="btn btn-dark" id="lblConfBtn" data-act="lblfim" data-cod="${it.cod}">Confirmar conferência</button></div></div>`:""}`:""}
     <div class="acts">${n>1?`<button class="btn ${imp?"":"btn-dark"}" data-act="imprimir" data-cod="${it.cod}">Imprimir todas juntas · ${it.etq} etiquetas</button>`:""}<button class="btn" data-act="zpl" data-cod="${it.cod}">Copiar ZPL</button>${imp?"":`<button class="lnkbtn" data-act="jaimp" data-cod="${it.cod}">Já imprimi, ir para o bipe</button>`}</div>
     <p class="hint">PDF no layout da térmica: 80 × 25 mm, duas etiquetas por linha.</p>
   </div>`;
@@ -227,23 +230,21 @@ function phScan(e,u,code){
 const lblCompleto=(it,s)=>it.anuncios.every(x=>((s.lab||{})[x.inv]||0)>=x.etiquetas);
 /* fecha a etiquetagem quando todas as etiquetas já foram bipadas (inclusive se o último envio ao servidor se perdeu) */
 function lblFinaliza(e,cod){ const it=itens(e).find(i=>i.cod===cod); const s=sepOf(e,cod);
-  s.status="etiquetado"; DB.lbl=null; DB.lmsg=null; toast("Produto etiquetado"); beep(true);
+  s.status="etiquetado"; DB.lbl=null; DB.lmsg=null; toast("Produto conferido"); beep(true);
   enfileira(async()=>{ try{ await api("sep",{envio:e.id,cod,acao:"fimlab",msg:`etiquetou ${nomeCod(cod)} (${it?it.etq:""} etiquetas)`}); }catch(x){ toast(x.message); try{ await carregar(true); }catch(_){} render(); } }); }
 function lblScan(e,code){
   const cod=DB.lbl; const it=itens(e).find(i=>i.cod===cod); const s=sepOf(e,cod); const c=code.trim().toUpperCase();
   const a=it.anuncios.find(x=>x.inv===c);
   if(!a){ DB.lmsg={ok:false,t:"Etiqueta incorreta"}; beep(false); return; }
   s.lab=s.lab||{};
-  if(lblCompleto(it,s)){ lblFinaliza(e,cod); return; }
+  if(lblCompleto(it,s)){ DB.lmsg={ok:false,t:"Todas as etiquetas já foram bipadas. Confirme a conferência abaixo."}; beep(false); return; }
   if((s.lab[c]||0)>=a.etiquetas){ DB.lmsg={ok:false,t:"Etiqueta sobrando"}; beep(false); return; }
   s.lab[c]=(s.lab[c]||0)+1; beep(true);
   DB.lmsg={ok:true,t:`${a.mult===1?"Unidade":"Kit"} conferido · ${s.lab[c]}/${a.etiquetas}`};
   const final=it.anuncios.every(x=>(s.lab[x.inv]||0)>=x.etiquetas);
-  if(final){ s.status="etiquetado"; DB.lbl=null; DB.lmsg=null; toast("Produto etiquetado"); }
-  enfileira(async()=>{ try{ const r=await api("sep",{envio:e.id,cod,acao:"lab",inv:c,max:a.etiquetas,final,msg:final?`etiquetou ${nomeCod(cod)} (${it.etq} etiquetas)`:""});
-      // a contagem do servidor já estava completa: garante que o item saia da etiquetagem
-      if(final&&r&&r.erro&&r.sep&&r.sep.status==="impresso") await api("sep",{envio:e.id,cod,acao:"fimlab"}); }catch(x){
-      // último bipe recusado porque o servidor já tinha a contagem completa: fecha o item em vez de deixá-lo em "Etiquetando"
-      if(final){ try{ await api("sep",{envio:e.id,cod,acao:"fimlab"}); return; }catch(_){} }
+  if(final) DB.lmsg={ok:true,t:"Todas as etiquetas bipadas"};
+  /* o item só fecha quando o usuário confirma a conferência (lblFinaliza) */
+  enfileira(async()=>{ try{ await api("sep",{envio:e.id,cod,acao:"lab",inv:c,max:a.etiquetas,final:false,msg:""}); }catch(x){
+      if(/já foram coladas/.test(x.message)) return; // o servidor já tinha essa contagem: nada a desfazer
       toast(x.message); beep(false); try{ await carregar(true); }catch(_){} render(); } });
 }
