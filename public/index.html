@@ -1304,7 +1304,10 @@ function lblScan(e,code){
   if(final){ s.status="etiquetado"; DB.lbl=null; DB.lmsg=null; toast("Produto etiquetado"); }
   enfileira(async()=>{ try{ const r=await api("sep",{envio:e.id,cod,acao:"lab",inv:c,max:a.etiquetas,final,msg:final?`etiquetou ${nomeCod(cod)} (${it.etq} etiquetas)`:""});
       // a contagem do servidor já estava completa: garante que o item saia da etiquetagem
-      if(final&&r&&r.erro&&r.sep&&r.sep.status==="impresso") await api("sep",{envio:e.id,cod,acao:"fimlab"}); }catch(x){ toast(x.message); beep(false); try{ await carregar(true); }catch(_){} render(); } });
+      if(final&&r&&r.erro&&r.sep&&r.sep.status==="impresso") await api("sep",{envio:e.id,cod,acao:"fimlab"}); }catch(x){
+      // último bipe recusado porque o servidor já tinha a contagem completa: fecha o item em vez de deixá-lo em "Etiquetando"
+      if(final){ try{ await api("sep",{envio:e.id,cod,acao:"fimlab"}); return; }catch(_){} }
+      toast(x.message); beep(false); try{ await carregar(true); }catch(_){} render(); } });
 }
 /* ---------- roteamento / login ---------- */
 /* celular: #s-<token> (gerado no servidor, vale só para um envio e uma pessoa); sem login */
