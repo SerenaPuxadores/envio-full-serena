@@ -457,7 +457,11 @@ Deno.serve(async (req) => {
         const ids = rows.map((r: any) => r.order_id); const ops: any[] = [];
         for (let i = 0; i < ids.length; i += 150) ops.push(...await q(db.from("full_ml_ops").select("data,tipo,disp,indisp,inv,ref->0->>value").in("tipo", ["sale_return", "sale_delivery_cancelation", "quarantine_reservation", "quarantine_restock"]).in("ref->0->>value", ids.slice(i, i + 150))));
         const vendidas = (res || []).filter((x: any) => x.tipo === "sale_confirmation").reduce((t: number, x: any) => t + Math.abs(+x.disp || 0), 0);
-        return out({ dias, conectado: mlLigado(a), dev_sync: a?.dev_sync || null, dev_msg: a?.dev_msg || null, devolucoes: rows, ops, indisp: est, vendidas });
+        // pedidos no período: do Full pelas movimentações (um envio = um pedido) e o total da conta pela busca de pedidos do ML
+        const pedFull = await q(db.rpc("full_ml_pedidos_full", { p_desde: desde }));
+        let pedTotal: number | null = null;
+        try { const t = await mlToken(); const j = await mlGet(t, `/orders/search?seller=${t.user_id}&order.date_created.from=${encodeURIComponent(desde.replace("Z", "-00:00"))}&limit=1`); pedTotal = +j?.paging?.total || 0; } catch { pedTotal = null; }
+        return out({ dias, conectado: mlLigado(a), dev_sync: a?.dev_sync || null, dev_msg: a?.dev_msg || null, devolucoes: rows, ops, indisp: est, vendidas, pedFull, pedTotal });
       }
       case "ml_desconectar": {
         must(gestor && !me.qrEnvio, "Só o gestor desconecta.");

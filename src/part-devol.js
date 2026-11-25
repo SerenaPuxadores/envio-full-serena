@@ -99,8 +99,9 @@ function gDevol(){
   const fullDev=(c.devolucoes||[]).filter(ehFull);
   const cnt=k=>todos.filter(r=>dvCat(r)===k);
   const un=l=>l.reduce((t,r)=>t+(+r.qtd||0),0);
-  /* taxa: unidades devolvidas de vendas do Full ÷ unidades vendidas pelo Full no período (o mesmo universo dos dois lados) */
-  const unDev=un(todos), unFull=un(fullDev), taxa=c.vendidas?unFull/c.vendidas*100:null;
+  /* taxas por pedido: pedidos devolvidos ÷ pedidos vendidos no período (Full com Full; geral com o total da conta) */
+  const unDev=un(todos), todasDev=c.devolucoes||[];
+  const pct=(a,b)=>b?(a/b*100).toLocaleString("pt-BR",{maximumFractionDigits:1})+"%":"—";
   const reemb=todos.filter(r=>r.status_money==="refunded").reduce((t,r)=>t+(+r.valor||0),0);
   /* peças indisponíveis no Full: as que o Full não vende e podem ser retiradas */
   const ind=[]; (c.indisp||[]).forEach(e=>(e.detalhe||[]).forEach(d=>{ if(d.status==="transfer"||!d.quantity) return; ind.push({...e,st:d.status,q:d.quantity}); }));
@@ -124,8 +125,9 @@ function gDevol(){
       ${aberto?`<tr class="dvdet"><td colspan="9">${dvCard(r)}</td></tr>`:""}`; }).join("");
   return hdr+`
     <div class="sumrow dvk">
-      ${card(n0(todos.length),"devoluções",`${n0(unDev)} un · últimos ${dias} dias`)}
-      ${card(taxa===null?"—":taxa.toLocaleString("pt-BR",{maximumFractionDigits:1})+"%","taxa de devolução do Full",`${n0(unFull)} devolvidas de ${n0(c.vendidas)} un vendidas pelo Full`)}
+      ${card(n0(todos.length),"pedidos devolvidos",`${n0(unDev)} un · últimos ${dias} dias`)}
+      ${card(pct(fullDev.length,c.pedFull),"taxa de devolução do Full",`${n0(fullDev.length)} de ${n0(c.pedFull)} pedidos do Full`)}
+      ${card(c.pedTotal==null?"—":pct(todasDev.length,c.pedTotal),"taxa de devolução geral",c.pedTotal==null?"total de pedidos indisponível agora":`${n0(todasDev.length)} de ${n0(c.pedTotal)} pedidos no total`)}
       ${card(n0(cnt("full").length),"voltaram ao Full",`${n0(un(cnt("full")))} un`,"dv-k-full")}
       ${card(n0(cnt("loja").length),"voltaram p/ nosso estoque",`${n0(un(cnt("loja")))} un`,"dv-k-loja")}
       ${card(n0(cnt("nao").length),"entregas não concluídas",`${n0(un(cnt("nao")))} un voltaram ao Full`,"dv-k-nao")}
