@@ -29,7 +29,6 @@ function dvFav(r){ const b=r.beneficiado||"";
   if(b.includes("complainant")) return ["Comprador","dv-nao"];
   if(b.includes("respondent")) return ["Loja","dv-full"];
   return r.claim_status==="opened"?["Em andamento","dv-and"]:["Nenhum",""]; }
-const dvFrete=r=>r.frete_dev==null?"—":`${BRL(+r.frete_dev)}${r.cobertura?" *":""}`;
 function dvCat(r){
   if(r.origem==="nao_entregue") return "nao";
   if(r.destino==="seller_address") return "loja";
@@ -111,7 +110,6 @@ function gDevol(){
   const unDev=un(todos), todasDev=c.devolucoes||[];
   const pct=(a,b)=>b?(a/b*100).toLocaleString("pt-BR",{maximumFractionDigits:1})+"%":"—";
   const reemb=todos.filter(r=>r.status_money==="refunded").reduce((t,r)=>t+(+r.valor||0),0);
-  const comFrete=todos.filter(r=>r.frete_dev!=null&&+r.frete_dev>0), freteTot=comFrete.reduce((t,r)=>t+(+r.frete_dev||0),0), freteCob=comFrete.filter(r=>r.cobertura).reduce((t,r)=>t+(+r.frete_dev||0),0);
   const favC=todos.filter(r=>dvFav(r)[0]==="Comprador").length, favL=todos.filter(r=>dvFav(r)[0]==="Loja").length;
   /* peças indisponíveis no Full: as que o Full não vende e podem ser retiradas */
   const ind=[]; (c.indisp||[]).forEach(e=>(e.detalhe||[]).forEach(d=>{ if(d.status==="transfer"||!d.quantity) return; ind.push({...e,st:d.status,q:d.quantity}); }));
@@ -131,10 +129,9 @@ function gDevol(){
       <td><span class="tag ${DV_CAT[k][1]}">${DV_CAT[k][0]}</span>${orig==="todas"&&r.logistica!=="fulfillment"?`<div class="t2">${r.logistica==="proprio"||r.logistica&&r.logistica!=="desconhecida"?"venda do estoque próprio":"origem não identificada"}</div>`:""}</td>
       <td class="dvsit">${esc(dvSituacao(r))}</td>
       <td>${(f=>f[1]?`<span class="tag ${f[1]}">${f[0]}</span>`:`<span class="t2">${f[0]}</span>`)(dvFav(r))}</td>
-      <td class="r num" ${r.cobertura&&r.frete_dev!=null?'title="Cobertura do Mercado Livre aplicada nesta devolução"':""}>${dvFrete(r)}</td>
       <td class="r num">${n0(+r.qtd)}</td><td class="r num">${BRL(+r.valor)}</td>
       <td class="r"><span class="dvchev" aria-hidden="true">${aberto?"▴":"▾"}</span></td></tr>
-      ${aberto?`<tr class="dvdet"><td colspan="11">${dvCard(r)}</td></tr>`:""}`; }).join("");
+      ${aberto?`<tr class="dvdet"><td colspan="10">${dvCard(r)}</td></tr>`:""}`; }).join("");
   return hdr+`
     <div class="sumrow dvk">
       ${card(n0(todos.length),"pedidos devolvidos",`${n0(unDev)} un · últimos ${dias} dias`)}
@@ -144,7 +141,6 @@ function gDevol(){
       ${card(n0(cnt("loja").length),"voltaram p/ nosso estoque",`${n0(un(cnt("loja")))} un`,"dv-k-loja")}
       ${card(n0(cnt("nao").length),"entregas não concluídas",`${n0(un(cnt("nao")))} un voltaram ao Full`,"dv-k-nao")}
       ${card(BRL(reemb),"reembolsado ao comprador",`${n0(cnt("and").length)} em andamento`)}
-      ${card(BRL(freteTot),"frete das etiquetas de devolução",`${n0(comFrete.length)} etiqueta${comFrete.length===1?"":"s"}${freteCob?` · ${BRL(freteCob)} com cobertura do ML`:""}`)}
       ${card(`${n0(favC)} × ${n0(favL)}`,"favorecido: comprador × loja",`${n0(todos.length-favC-favL)} sem favorecido definido`)}
     </div>
     ${semClass?`<div class="lmsg">Identificando a origem de ${n0(semClass)} devolução${semClass>1?"ões":""} (Full ou estoque próprio). ${orig==="full"?"Elas aparecem neste filtro assim que forem identificadas.":""}</div>`:""}
@@ -153,9 +149,9 @@ function gDevol(){
     <div class="panel"><div class="phd"><h3>Vendas devolvidas</h3></div>
       <div class="fbar"><div class="busca2"><span aria-hidden="true">${LUPA}</span><input class="inp" id="dvQ" placeholder="Buscar pedido, produto ou SKU" value="${esc(DB.dvQ||"")}" autocomplete="off"></div>
         <div class="seg" role="group" aria-label="Filtrar devoluções">${[["todas","Todas",todos.length],["full","Voltou ao Full",cnt("full").length],["loja","Nosso estoque",cnt("loja").length],["nao","Não entregues",cnt("nao").length],["and","Em andamento",cnt("and").length],["sem","Sem retorno",cnt("sem").length]].filter(([k,,n])=>k==="todas"||n).map(([k,t,n])=>`<button aria-pressed="${filtro===k}" data-act="dv-f" data-f="${k}">${t} <small>${n}</small></button>`).join("")}</div></div>
-      <div class="tbox"><table class="t dvt"><thead><tr><th>Pedido</th><th>Produto</th><th>Venda</th><th>Devolução</th><th>Destino</th><th>Situação</th><th>Favorecido</th><th class="r">Frete dev.</th><th class="r">Qtd</th><th class="r">Valor</th><th></th></tr></thead>
-      <tbody>${linhas||`<tr><td colspan="11" class="muted">Nenhuma devolução encontrada.</td></tr>`}</tbody></table></div>${P.html}
-      ${comFrete.length?`<p class="hint">Frete dev.: custo do envio de devolução que o Mercado Livre atribui à loja. * Devolução com cobertura do Mercado Livre aplicada: o ML pode ter assumido esse custo; confira o débito no faturamento do Mercado Livre.</p>`:""}</div>
+      <div class="tbox"><table class="t dvt"><thead><tr><th>Pedido</th><th>Produto</th><th>Venda</th><th>Devolução</th><th>Destino</th><th>Situação</th><th>Favorecido</th><th class="r">Qtd</th><th class="r">Valor</th><th></th></tr></thead>
+      <tbody>${linhas||`<tr><td colspan="10" class="muted">Nenhuma devolução encontrada.</td></tr>`}</tbody></table></div>${P.html}
+</div>
     <div class="panel"><div class="phd"><h3>Disponível para retirada no Full</h3><span class="muted">${n0(ret.reduce((t,x)=>t+x.q,0))} peças</span></div>
       <p class="hint">Peças que estão no Full mas não podem ser vendidas. As marcadas como “retirar” vocês podem solicitar a retirada no Mercado Livre; as demais são informativas.</p>
       ${ind.length?`<div class="tbox"><table class="t"><thead><tr><th>Anúncio</th><th>Produto</th><th>Motivo</th><th class="r">Qtd</th><th></th></tr></thead><tbody>
@@ -167,8 +163,7 @@ function dvCard(r){
   const ev=dvEventos(r);
   const info=[["Pedido",r.order_id],["Reclamação",r.claim_id||"—"],["Destino",r.destino==="warehouse"?"Full":r.destino==="seller_address"?"Nosso estoque":"—"],
     ["Devolução",r.ret_status?(DV_RET[r.ret_status]||r.ret_status):"—"],["Resolução",r.resolucao?(DV_RES[r.resolucao]||r.resolucao):r.claim_status==="opened"?"Em andamento":"—"],
-    ["Dinheiro",r.status_money?(DV_MONEY[r.status_money]||r.status_money):"—"],["Favorecido",dvFav(r)[0]],
-    ["Frete da devolução",r.frete_dev==null?"—":`${BRL(+r.frete_dev)}${r.cobertura?" (cobertura do ML aplicada)":""}`],["Revisão do Full",r.condicao?(DV_COND[r.condicao]||r.condicao):"—"]];
+    ["Dinheiro",r.status_money?(DV_MONEY[r.status_money]||r.status_money):"—"],["Favorecido",dvFav(r)[0]],["Revisão do Full",r.condicao?(DV_COND[r.condicao]||r.condicao):"—"]];
   return `<div class="dvcard"><dl class="dvinfo">${info.map(([a,b])=>`<div><dt>${a}</dt><dd>${esc(b)}</dd></div>`).join("")}</dl>
     <h4>Histórico do pedido</h4>
     ${ev.length?`<ol class="dvtl">${ev.map(e=>`<li class="${e.src}"><time>${dvHora(e.d)}</time><span>${esc(e.t)}</span></li>`).join("")}</ol>`:`<p class="muted">Sem eventos registrados para este pedido.</p>`}</div>`; }
