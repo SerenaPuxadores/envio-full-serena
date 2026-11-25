@@ -194,6 +194,12 @@ async function devPedido(a: any, oid: string) {
   const node = it?.stock?.node_id || ""; const logistica = shp?.logistic_type || (node ? (/^BRP\d/.test(node) ? "proprio" : "fulfillment") : null);
   return { ord, it, ev, envio: shp?.status || null, logistica };
 }
+// custo do envio da devolução atribuído à loja (destinatário do envio de retorno), já descontadas as compensações do ML
+async function devFrete(a: any, sid: any) {
+  const c = await mlGet(a, `/shipments/${sid}/costs`).catch(nao429); await espera(250);
+  if (!c?.receiver) return null;
+  return Math.round(((+c.receiver.cost || 0) - (+c.receiver.compensation || 0)) * 100) / 100;
+}
 async function devClaim(a: any, c: any) {
   const oid = String(c.resource_id);
   const hist = await mlGet(a, `/post-purchase/v1/claims/${c.id}/status_history`).catch(nao429); await espera(250);
@@ -201,6 +207,7 @@ async function devClaim(a: any, c: any) {
   const p = await devPedido(a, oid);
   const rs = (ret?.shipments || []).find((x: any) => x.type === "return") || ret?.shipments?.[0];
   const rsh = rs?.shipment_id ? await mlGet(a, `/shipments/${rs.shipment_id}`).catch(nao429) : null; if (rs?.shipment_id) await espera(250);
+  const frete = rs?.shipment_id ? await devFrete(a, rs.shipment_id) : null;
   let review: any = null;
   if (ret?.id && (ret.related_entities || []).includes("reviews")) { review = await mlGet(a, `/post-purchase/v1/returns/${ret.id}/reviews`).catch(nao429); await espera(250); }
   const destino = rs?.destination?.name || null;
@@ -219,7 +226,7 @@ async function devClaim(a: any, c: any) {
     ret_id: ret?.id ? String(ret.id) : null, ret_status: ret?.status || null, destino, status_money: ret?.status_money || null, ship_status: rsh?.status || rs?.status || null,
     venda_em: isoD(p.ord?.date_created), devol_em: isoD(c.date_created), fechado_em: isoD(ret?.date_closed || c.resolution?.date_created),
     item_id: p.it?.item?.id || null, titulo: p.it?.item?.title || null, sku: p.it?.item?.seller_sku || null, qtd, valor: Math.round((+p.it?.unit_price || 0) * qtd * 100) / 100,
-    logistica: p.logistica, eventos: ev, review: review ? { condicao: cond, raw: review } : null, raw: { claim: c, ret }, ml_updated: isoD(c.last_updated), updated_at: new Date().toISOString() };
+    logistica: p.logistica, frete_dev: frete, frete_ok: true, cobertura: c.resolution ? !!c.resolution.applied_coverage : null, eventos: ev, review: review ? { condicao: cond, raw: review } : null, raw: { claim: c, ret }, ml_updated: isoD(c.last_updated), updated_at: new Date().toISOString() };
 }
 async function devSync() {
   const t0 = Date.now(); const a = await mlToken();
@@ -249,7 +256,7 @@ async function devSync() {
         await q(db.from("full_ml_devol").upsert({ order_id: oid, claim_id: null, origem: "nao_entregue", claim_status: null, resolucao: null, beneficiado: null, ret_id: null, ret_status: "nao_entregue",
           destino: "warehouse", status_money: null, ship_status: p.envio, venda_em: isoD(p.ord?.date_created), devol_em: isoD(op.data), fechado_em: isoD(op.data),
           item_id: p.it?.item?.id || null, titulo: p.it?.item?.title || null, sku: p.it?.item?.seller_sku || null, qtd, valor: Math.round((+p.it?.unit_price || 0) * qtd * 100) / 100,
-          logistica: p.logistica || "fulfillment", eventos: p.ev, review: null, raw: { op, pedido: !!p.ord }, ml_updated: isoD(op.data), updated_at: new Date().toISOString() }));
+          logistica: p.logistica || "fulfillment", frete_ok: true, eventos: p.ev, review: null, raw: { op, pedido: !!p.ord }, ml_updated: isoD(op.data), updated_at: new Date().toISOString() }));
         n++;
       }
     }
@@ -263,6 +270,16 @@ async function devSync() {
         const node = ord?.order_items?.[0]?.stock?.node_id || "";
         const lg = shp?.logistic_type || (node ? (/^BRP\d/.test(node) ? "proprio" : "fulfillment") : "desconhecida");
         await q(db.from("full_ml_devol").update({ logistica: lg }).eq("order_id", r.order_id)); n++;
+      }
+    }
+    // devoluções gravadas antes de guardar o frete: busca o custo do envio de retorno
+    if (!parcial) {
+      const sem = await q(db.from("full_ml_devol").select("order_id,raw->ret->shipments").eq("frete_ok", false).limit(80));
+      for (const r of sem) {
+        if (Date.now() - t0 > 90000) { parcial = true; break; }
+        const sh = (r.shipments || []).find((x: any) => x.type === "return") || (r.shipments || [])[0];
+        const fr = sh?.shipment_id ? await devFrete(a, sh.shipment_id) : null;
+        await q(db.from("full_ml_devol").update({ frete_dev: fr, frete_ok: true }).eq("order_id", r.order_id)); n++;
       }
     }
   } catch (e) {
@@ -450,7 +467,7 @@ Deno.serve(async (req) => {
         const dias = Math.min(365, Math.max(1, +b.dias || 30));
         const desde = new Date(Date.now() - dias * 86400000).toISOString();
         const [a, rows, est, res] = await Promise.all([
-          mlAuth(), todas((x, y) => db.from("full_ml_devol").select("order_id,claim_id,origem,claim_status,resolucao,beneficiado,ret_status,destino,status_money,ship_status,venda_em,devol_em,fechado_em,item_id,titulo,sku,qtd,valor,logistica,eventos,review->condicao").gte("devol_em", desde).order("devol_em", { ascending: false }).range(x, y)),
+          mlAuth(), todas((x, y) => db.from("full_ml_devol").select("order_id,claim_id,origem,claim_status,resolucao,beneficiado,ret_status,destino,status_money,ship_status,venda_em,devol_em,fechado_em,item_id,titulo,sku,qtd,valor,logistica,frete_dev,cobertura,eventos,review->condicao").gte("devol_em", desde).order("devol_em", { ascending: false }).range(x, y)),
           todas((x, y) => db.from("full_ml_estoque").select("inv,item_id,titulo,sku,total,disponivel,indisponivel,detalhe").gt("indisponivel", 0).order("inv").range(x, y)),
           q(db.rpc("full_ml_resumo_json", { p_desde: desde })),
         ]);
