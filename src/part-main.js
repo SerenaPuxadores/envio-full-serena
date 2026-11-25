@@ -118,6 +118,7 @@ document.addEventListener("click",ev=>{
     case "tab": DB.tab=b.dataset.t; DB.uEdit=null; if(DB.tab==="estoque"&&DB.ml) mlCarregar(); if(DB.tab==="devolucoes"&&DB.dv) dvCarregar(); break;
     case "dv-sync": dvSincronizar(); return;
     case "dv-dias": DB.dvDias=+b.dataset.d; DB.pg.dv=1; DB.dvOpen=null; dvCarregar(); break;
+    case "dv-orig": DB.dvOrig=b.dataset.o; DB.pg.dv=1; DB.dvOpen=null; break;
     case "dv-f": DB.dvF=b.dataset.f; DB.pg.dv=1; DB.dvOpen=null; break;
     case "dv-open": DB.dvOpen=DB.dvOpen===b.dataset.o?null:b.dataset.o; break;
     case "ml-conectar": mlConectar(); return;

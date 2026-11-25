@@ -93,10 +93,14 @@ function gDevol(){
   if(DB.dvErro) return hdr+`<div class="note warn"><span>${esc(DB.dvErro)}</span></div>`;
   const c=DB.dv, dias=c.dias;
   if(!c.conectado) return hdr+`<div class="note warn"><span>Conecte o Mercado Livre na aba Estoque Full para ver as devoluções.</span></div>`;
-  const todos=c.devolucoes||[];
+  const orig=DB.dvOrig||"full", ehFull=r=>r.logistica==="fulfillment";
+  const semClass=(c.devolucoes||[]).filter(r=>!r.logistica).length;
+  const todos=orig==="full"?(c.devolucoes||[]).filter(ehFull):(c.devolucoes||[]);
+  const fullDev=(c.devolucoes||[]).filter(ehFull);
   const cnt=k=>todos.filter(r=>dvCat(r)===k);
   const un=l=>l.reduce((t,r)=>t+(+r.qtd||0),0);
-  const unDev=un(todos), taxa=c.vendidas?unDev/c.vendidas*100:null;
+  /* taxa: unidades devolvidas de vendas do Full ÷ unidades vendidas pelo Full no período (o mesmo universo dos dois lados) */
+  const unDev=un(todos), unFull=un(fullDev), taxa=c.vendidas?unFull/c.vendidas*100:null;
   const reemb=todos.filter(r=>r.status_money==="refunded").reduce((t,r)=>t+(+r.valor||0),0);
   /* peças indisponíveis no Full: as que o Full não vende e podem ser retiradas */
   const ind=[]; (c.indisp||[]).forEach(e=>(e.detalhe||[]).forEach(d=>{ if(d.status==="transfer"||!d.quantity) return; ind.push({...e,st:d.status,q:d.quantity}); }));
@@ -113,7 +117,7 @@ function gDevol(){
       <td class="mono">${esc(r.order_id)}</td>
       <td><div class="dvtit">${esc(r.titulo||"—")}</div>${r.sku?`<span class="t2">SKU ${esc(r.sku)}</span>`:""}</td>
       <td class="num">${dvData(r.venda_em)}</td><td class="num">${dvData(r.devol_em)}${dd!==null?`<div class="t2">${dd} dia${dd===1?"":"s"} depois</div>`:""}</td>
-      <td><span class="tag ${DV_CAT[k][1]}">${DV_CAT[k][0]}</span></td>
+      <td><span class="tag ${DV_CAT[k][1]}">${DV_CAT[k][0]}</span>${orig==="todas"&&r.logistica!=="fulfillment"?`<div class="t2">${r.logistica==="proprio"||r.logistica&&r.logistica!=="desconhecida"?"venda do estoque próprio":"origem não identificada"}</div>`:""}</td>
       <td class="dvsit">${esc(dvSituacao(r))}</td>
       <td class="r num">${n0(+r.qtd)}</td><td class="r num">${BRL(+r.valor)}</td>
       <td class="r"><span class="dvchev" aria-hidden="true">${aberto?"▴":"▾"}</span></td></tr>
@@ -121,13 +125,14 @@ function gDevol(){
   return hdr+`
     <div class="sumrow dvk">
       ${card(n0(todos.length),"devoluções",`${n0(unDev)} un · últimos ${dias} dias`)}
-      ${card(taxa===null?"—":taxa.toLocaleString("pt-BR",{maximumFractionDigits:1})+"%","taxa de devolução",`${n0(unDev)} de ${n0(c.vendidas)} un vendidas`)}
+      ${card(taxa===null?"—":taxa.toLocaleString("pt-BR",{maximumFractionDigits:1})+"%","taxa de devolução do Full",`${n0(unFull)} devolvidas de ${n0(c.vendidas)} un vendidas pelo Full`)}
       ${card(n0(cnt("full").length),"voltaram ao Full",`${n0(un(cnt("full")))} un`,"dv-k-full")}
       ${card(n0(cnt("loja").length),"voltaram p/ nosso estoque",`${n0(un(cnt("loja")))} un`,"dv-k-loja")}
       ${card(n0(cnt("nao").length),"entregas não concluídas",`${n0(un(cnt("nao")))} un voltaram ao Full`,"dv-k-nao")}
       ${card(BRL(reemb),"reembolsado ao comprador",`${n0(cnt("and").length)} em andamento`)}
     </div>
-    <div class="panel"><div class="fbar"><div class="seg" role="group" aria-label="Período">${PER.map(([d,t])=>`<button aria-pressed="${dias===d}" data-act="dv-dias" data-d="${d}">${t}</button>`).join("")}</div></div>
+    ${semClass?`<div class="lmsg">Identificando a origem de ${n0(semClass)} devolução${semClass>1?"ões":""} (Full ou estoque próprio). ${orig==="full"?"Elas aparecem neste filtro assim que forem identificadas.":""}</div>`:""}
+    <div class="panel"><div class="fbar"><div class="seg" role="group" aria-label="Origem da venda">${[["full","Vendas do Full"],["todas","Todas as vendas"]].map(([k,t])=>`<button aria-pressed="${orig===k}" data-act="dv-orig" data-o="${k}">${t}</button>`).join("")}</div><div class="seg" role="group" aria-label="Período">${PER.map(([d,t])=>`<button aria-pressed="${dias===d}" data-act="dv-dias" data-d="${d}">${t}</button>`).join("")}</div></div>
       ${todos.length?dvGrafico(todos,dias):`<p class="muted">Nenhuma devolução nos últimos ${dias} dias.${c.dev_sync?"":" Clique em “Sincronizar devoluções” para buscar no Mercado Livre."}</p>`}</div>
     <div class="panel"><div class="phd"><h3>Vendas devolvidas</h3></div>
       <div class="fbar"><div class="busca2"><span aria-hidden="true">${LUPA}</span><input class="inp" id="dvQ" placeholder="Buscar pedido, produto ou SKU" value="${esc(DB.dvQ||"")}" autocomplete="off"></div>
