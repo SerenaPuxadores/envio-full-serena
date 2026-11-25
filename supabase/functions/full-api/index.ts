@@ -246,7 +246,7 @@ const mesclaEv = (xs: any[]) => unico(xs.filter(Boolean), (e: any) => `${e.d}|${
 
 async function devSync() {
   const t0 = Date.now(); const a = await mlToken(); const D = 86400000;
-  const tempo = () => Date.now() - t0 > 95000;
+  const tempo = () => Date.now() - t0 > 95000, tempoA = () => Date.now() - t0 > 50000;
   const desde = a.dev_ate ? new Date(new Date(a.dev_ate).getTime() - 60000).toISOString() : new Date(Date.now() - 150 * D).toISOString();
   const desdeMed = a.dev_med_ate ? new Date(new Date(a.dev_med_ate).getTime() - 60000).toISOString() : new Date(Date.now() - 150 * D).toISOString();
   let n = 0, ultimo = a.dev_ate || null, ultimoMed = a.dev_med_ate || null, parcial = false;
@@ -256,7 +256,7 @@ async function devSync() {
       const j = await mlGet(a, `/post-purchase/v1/claims/search?player_role=respondent&player_user_id=${a.user_id}&type=returns&range=last_updated:after:${encodeURIComponent(desde)}&sort=last_updated:asc&limit=50&offset=${off}`);
       const cs = j.data || [];
       for (const c of cs) {
-        if (tempo()) { parcial = true; break fora; }
+        if (tempoA()) { parcial = true; break fora; }
         if (c.fulfilled === true) { const row = await devClaim(a, c); await q(db.from("full_ml_devol").upsert({ ...row, rep_ok: false, fat_em: null })); n++; }
         ultimo = c.last_updated;
       }
@@ -267,7 +267,7 @@ async function devSync() {
       const j = await mlGet(a, `/post-purchase/v1/claims/search?player_role=respondent&player_user_id=${a.user_id}&type=mediations&range=last_updated:after:${encodeURIComponent(desdeMed)}&sort=last_updated:asc&limit=50&offset=${off}`);
       const cs = j.data || [];
       for (const c of cs) {
-        if (tempo()) { parcial = true; break fora2; }
+        if (tempoA()) { parcial = true; break fora2; }
         const oid = String(c.resource_id);
         const ex = await q(db.from("full_ml_devol").select("order_id,claim_id,origem,eventos").eq("order_id", oid).maybeSingle());
         if (ex && ex.claim_id && ex.claim_id !== String(c.id)) {
@@ -296,7 +296,7 @@ async function devSync() {
       const ids = [...porPed.keys()];
       const ja = new Set<string>(); for (let i = 0; i < ids.length; i += 200) (await q(db.from("full_ml_devol").select("order_id").in("order_id", ids.slice(i, i + 200)))).forEach((r: any) => ja.add(r.order_id));
       for (const oid of ids.filter((x) => !ja.has(x))) {
-        if (tempo()) { parcial = true; break; }
+        if (tempoA()) { parcial = true; break; }
         const op = porPed.get(oid); const p = await devPedido(a, oid);
         const qtd = Math.max(1, +op.disp || 1);
         await q(db.from("full_ml_devol").upsert({ order_id: oid, claim_id: null, origem: "nao_entregue", claim_status: null, resolucao: null, beneficiado: null, ret_id: null, ret_status: "nao_entregue",
@@ -310,7 +310,7 @@ async function devSync() {
     if (!parcial) {
       const sem = await q(db.from("full_ml_devol").select("order_id").is("logistica", null).limit(60));
       for (const r of sem) {
-        if (tempo()) { parcial = true; break; }
+        if (tempoA()) { parcial = true; break; }
         const ord = await mlGet(a, `/orders/${r.order_id}`).catch(nao429); await espera(250);
         const sid = ord?.shipping?.id; const shp = sid ? await mlGet(a, `/shipments/${sid}`).catch(nao429) : null; if (sid) await espera(250);
         const node = ord?.order_items?.[0]?.stock?.node_id || "";
@@ -318,11 +318,18 @@ async function devSync() {
         await q(db.from("full_ml_devol").update({ logistica: lg }).eq("order_id", r.order_id)); n++;
       }
     }
+  } catch (e) {
+    if (lim429(e)) parcial = true; else { await db.from("full_ml_auth").update({ dev_ate: ultimo, dev_med_ate: ultimoMed, dev_msg: e instanceof Error ? e.message : String(e) }).eq("id", 1); throw e; }
+  }
+  await q(db.from("full_ml_auth").update({ dev_ate: ultimo, dev_med_ate: ultimoMed }).eq("id", 1));
+  // 5 e 6 têm tempo próprio: não dependem de a busca de reclamações ter terminado
+  let p2 = false;
+  try {
     // 5) se a reclamação/mediação afeta a reputação (reconsulta enquanto estiver aberta)
-    if (!parcial) {
+    {
       const sem = await q(db.from("full_ml_devol").select("order_id,claim_id,mediacao_id,claim_status").not("claim_id", "is", null).or("rep_ok.eq.false,claim_status.neq.closed").order("updated_at").limit(40));
       for (const r of sem) {
-        if (tempo()) { parcial = true; break; }
+        if (tempo()) { p2 = true; break; }
         const vs: string[] = [];
         for (const id of [r.claim_id, r.mediacao_id].filter(Boolean)) {
           const j = await mlGet(a, `/post-purchase/v1/claims/${id}/affects-reputation`).catch(nao429); await espera(300);
@@ -332,31 +339,31 @@ async function devSync() {
         await q(db.from("full_ml_devol").update({ reputacao: rep, rep_ok: r.claim_status === "closed" && !!rep }).eq("order_id", r.order_id)); n++;
       }
     }
+  } catch (e) { if (lim429(e)) p2 = true; else throw e; }
+  try {
     // 6) faturamento: tarifa de devolução e tarifas estornadas (reconsulta por 60 dias após o fechamento; o ML lança a tarifa dias depois)
-    if (!parcial) {
+    {
       const lim = new Date(Date.now() - 20 * 3600000).toISOString(), rec = new Date(Date.now() - 60 * D).toISOString();
       const sem = (await q(db.from("full_ml_devol").select("order_id,fat_em,fechado_em").like("order_id", "2000%")
         .or(`fat_em.is.null,and(fat_em.lt.${lim},or(fechado_em.is.null,fechado_em.gt.${rec}))`).order("fat_em", { ascending: true, nullsFirst: true }).limit(60))) as any[];
       const grava = async (rows: any[]) => { for (const x of rows) await q(db.from("full_ml_devol").update({ ...x, fat_em: new Date().toISOString() }).eq("order_id", x.order_id)); n += rows.length; };
       for (let i = 0; i < sem.length; i += 10) {
-        if (tempo()) { parcial = true; break; }
+        if (tempo()) { p2 = true; break; }
         const ids = sem.slice(i, i + 10).map((r) => r.order_id);
         try { await grava(await devFaturamento(a, ids)); }
         catch (e) {
-          if (lim429(e)) { parcial = true; break; }
+          if (lim429(e)) { p2 = true; break; }
           for (const id of ids) { await espera(1500);
             try { await grava(await devFaturamento(a, [id])); }
-            catch (e2) { if (lim429(e2)) { parcial = true; break; } await q(db.from("full_ml_devol").update({ fat_em: new Date().toISOString() }).eq("order_id", id)); } }
-          if (parcial) break;
+            catch (e2) { if (lim429(e2)) { p2 = true; break; } await q(db.from("full_ml_devol").update({ fat_em: new Date().toISOString() }).eq("order_id", id)); } }
+          if (p2) break;
         }
         await espera(1500);
       }
     }
-  } catch (e) {
-    if (lim429(e)) parcial = true; else { await db.from("full_ml_auth").update({ dev_ate: ultimo, dev_med_ate: ultimoMed, dev_msg: e instanceof Error ? e.message : String(e) }).eq("id", 1); throw e; }
-  }
-  await q(db.from("full_ml_auth").update({ dev_ate: ultimo, dev_med_ate: ultimoMed, dev_sync: new Date().toISOString(), dev_msg: null }).eq("id", 1));
-  return { devolucoes: n, parcial };
+  } catch (e) { if (lim429(e)) p2 = true; else throw e; }
+  await q(db.from("full_ml_auth").update({ dev_sync: new Date().toISOString(), dev_msg: null }).eq("id", 1));
+  return { devolucoes: n, parcial: parcial || p2 };
 }
 
 async function rev() {
