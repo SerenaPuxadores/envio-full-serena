@@ -111,7 +111,7 @@ function gDevol(){
   const unDev=un(todos), todasDev=c.devolucoes||[];
   const pct=(a,b)=>b?(a/b*100).toLocaleString("pt-BR",{maximumFractionDigits:1})+"%":"—";
   const reemb=todos.filter(r=>r.status_money==="refunded").reduce((t,r)=>t+(+r.valor||0),0);
-  const comFrete=todos.filter(r=>r.frete_dev!=null&&+r.frete_dev>0), fretePago=comFrete.filter(r=>!r.cobertura).reduce((t,r)=>t+(+r.frete_dev||0),0);
+  const comFrete=todos.filter(r=>r.frete_dev!=null&&+r.frete_dev>0), freteTot=comFrete.reduce((t,r)=>t+(+r.frete_dev||0),0), freteCob=comFrete.filter(r=>r.cobertura).reduce((t,r)=>t+(+r.frete_dev||0),0);
   const favC=todos.filter(r=>dvFav(r)[0]==="Comprador").length, favL=todos.filter(r=>dvFav(r)[0]==="Loja").length;
   /* peças indisponíveis no Full: as que o Full não vende e podem ser retiradas */
   const ind=[]; (c.indisp||[]).forEach(e=>(e.detalhe||[]).forEach(d=>{ if(d.status==="transfer"||!d.quantity) return; ind.push({...e,st:d.status,q:d.quantity}); }));
@@ -144,7 +144,7 @@ function gDevol(){
       ${card(n0(cnt("loja").length),"voltaram p/ nosso estoque",`${n0(un(cnt("loja")))} un`,"dv-k-loja")}
       ${card(n0(cnt("nao").length),"entregas não concluídas",`${n0(un(cnt("nao")))} un voltaram ao Full`,"dv-k-nao")}
       ${card(BRL(reemb),"reembolsado ao comprador",`${n0(cnt("and").length)} em andamento`)}
-      ${card(BRL(fretePago),"frete de devolução pago",`${n0(comFrete.filter(r=>!r.cobertura).length)} etiqueta${comFrete.filter(r=>!r.cobertura).length===1?"":"s"}${comFrete.some(r=>r.cobertura)?` · ${n0(comFrete.filter(r=>r.cobertura).length)} com cobertura do ML`:""}`)}
+      ${card(BRL(freteTot),"frete das etiquetas de devolução",`${n0(comFrete.length)} etiqueta${comFrete.length===1?"":"s"}${freteCob?` · ${BRL(freteCob)} com cobertura do ML`:""}`)}
       ${card(`${n0(favC)} × ${n0(favL)}`,"favorecido: comprador × loja",`${n0(todos.length-favC-favL)} sem favorecido definido`)}
     </div>
     ${semClass?`<div class="lmsg">Identificando a origem de ${n0(semClass)} devolução${semClass>1?"ões":""} (Full ou estoque próprio). ${orig==="full"?"Elas aparecem neste filtro assim que forem identificadas.":""}</div>`:""}
@@ -155,7 +155,7 @@ function gDevol(){
         <div class="seg" role="group" aria-label="Filtrar devoluções">${[["todas","Todas",todos.length],["full","Voltou ao Full",cnt("full").length],["loja","Nosso estoque",cnt("loja").length],["nao","Não entregues",cnt("nao").length],["and","Em andamento",cnt("and").length],["sem","Sem retorno",cnt("sem").length]].filter(([k,,n])=>k==="todas"||n).map(([k,t,n])=>`<button aria-pressed="${filtro===k}" data-act="dv-f" data-f="${k}">${t} <small>${n}</small></button>`).join("")}</div></div>
       <div class="tbox"><table class="t dvt"><thead><tr><th>Pedido</th><th>Produto</th><th>Venda</th><th>Devolução</th><th>Destino</th><th>Situação</th><th>Favorecido</th><th class="r">Frete dev.</th><th class="r">Qtd</th><th class="r">Valor</th><th></th></tr></thead>
       <tbody>${linhas||`<tr><td colspan="11" class="muted">Nenhuma devolução encontrada.</td></tr>`}</tbody></table></div>${P.html}
-      ${todos.some(r=>r.cobertura&&r.frete_dev!=null)?`<p class="hint">* Devolução com cobertura do Mercado Livre aplicada: o frete aparece para referência e fica fora do total pago pela loja.</p>`:""}</div>
+      ${comFrete.length?`<p class="hint">Frete dev.: custo do envio de devolução que o Mercado Livre atribui à loja. * Devolução com cobertura do Mercado Livre aplicada: o ML pode ter assumido esse custo; confira o débito no faturamento do Mercado Livre.</p>`:""}</div>
     <div class="panel"><div class="phd"><h3>Disponível para retirada no Full</h3><span class="muted">${n0(ret.reduce((t,x)=>t+x.q,0))} peças</span></div>
       <p class="hint">Peças que estão no Full mas não podem ser vendidas. As marcadas como “retirar” vocês podem solicitar a retirada no Mercado Livre; as demais são informativas.</p>
       ${ind.length?`<div class="tbox"><table class="t"><thead><tr><th>Anúncio</th><th>Produto</th><th>Motivo</th><th class="r">Qtd</th><th></th></tr></thead><tbody>
