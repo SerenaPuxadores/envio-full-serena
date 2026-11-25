@@ -19,6 +19,9 @@ const DV_COND={saleable:"vendável (voltou ao estoque)",unsaleable:"não vendáv
 const DV_IND={notSupported:["Não aceito pelo Full",true],damaged:["Avariado",true],withdrawal:["Reservado para retirada",true],noFiscalCoverage:["Sem cobertura fiscal",false],lost:["Extraviado",false],
   transfer:["Em transferência",false],internal_process:["Em processo interno",false],quarantine:["Em quarentena",false],inQuarantine:["Em quarentena",false]};
 const DV_MONEY={refunded:"Dinheiro devolvido ao comprador",retained:"Dinheiro retido",available:"Dinheiro liberado para você"};
+const dvRep=r=>r.reputacao==="affected";
+/* custo do Mercado Livre que ficou com a loja: tarifa de devolução + tarifas da venda que não foram estornadas */
+const dvCusto=r=>r.fat_em?(+r.tarifa_dev||0)+(+r.tarifas_cobr||0)-(+r.tarifas_est||0):null;
 const dvData=d=>d?new Date(d).toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"2-digit"}):"—";
 const dvHora=d=>d?new Date(d).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"}):"—";
 
@@ -110,28 +113,32 @@ function gDevol(){
   const unDev=un(todos), todasDev=c.devolucoes||[];
   const pct=(a,b)=>b?(a/b*100).toLocaleString("pt-BR",{maximumFractionDigits:1})+"%":"—";
   const reemb=todos.filter(r=>r.status_money==="refunded").reduce((t,r)=>t+(+r.valor||0),0);
+  const repL=todos.filter(dvRep), tarL=todos.filter(r=>+r.tarifa_dev>0);
+  const tarTot=tarL.reduce((t,r)=>t+(+r.tarifa_dev||0),0), naoEst=todos.reduce((t,r)=>t+(r.fat_em?Math.max(0,(+r.tarifas_cobr||0)-(+r.tarifas_est||0)):0),0);
+  const semFat=todos.filter(r=>!r.fat_em&&/^2000/.test(r.order_id)).length;
   const favC=todos.filter(r=>dvFav(r)[0]==="Comprador").length, favL=todos.filter(r=>dvFav(r)[0]==="Loja").length;
   /* peças indisponíveis no Full: as que o Full não vende e podem ser retiradas */
   const ind=[]; (c.indisp||[]).forEach(e=>(e.detalhe||[]).forEach(d=>{ if(d.status==="transfer"||!d.quantity) return; ind.push({...e,st:d.status,q:d.quantity}); }));
   const ret=ind.filter(x=>(DV_IND[x.st]||[0,true])[1]);
   const card=(v,t,s,cls="")=>`<div class="sum ${cls}"><b class="num">${v}</b><span>${t}</span>${s?`<small class="t2">${s}</small>`:""}</div>`;
   const filtro=DB.dvF||"todas", qs=normB(DB.dvQ||"");
-  let lst=filtro==="todas"?todos:cnt(filtro);
+  let lst=filtro==="todas"?todos:filtro==="rep"?todos.filter(dvRep):cnt(filtro);
   if(qs) lst=lst.filter(r=>buscaAprox(qs,[r.order_id,r.titulo,r.sku,r.item_id,dvSituacao(r)].join(" ")));
   const P=pager("dv",lst.length,20), pg=lst.slice(P.ini,P.fim);
   const PER=[[15,"15 dias"],[30,"30 dias"],[60,"60 dias"],[90,"90 dias"],[180,"180 dias"]];
   const linhas=pg.map(r=>{ const k=dvCat(r), aberto=DB.dvOpen===r.order_id;
     const dd=r.venda_em&&r.devol_em?Math.round((Date.parse(r.devol_em)-Date.parse(r.venda_em))/864e5):null;
     return `<tr class="dvrow ${aberto?"on":""}" data-act="dv-open" data-o="${esc(r.order_id)}" tabindex="0" aria-expanded="${aberto}">
-      <td class="mono">${esc(r.order_id)}</td>
+      <td class="mono">${esc(r.order_id)}${r.origem==="mediacao"||r.mediacao_id?`<div><span class="tag dv-and">mediação</span></div>`:""}${dvRep(r)?`<div><span class="tag dv-rep">afeta reputação</span></div>`:""}</td>
       <td><div class="dvtit">${esc(r.titulo||"—")}</div>${r.sku?`<span class="t2">SKU ${esc(r.sku)}</span>`:""}</td>
       <td class="num">${dvData(r.venda_em)}</td><td class="num">${dvData(r.devol_em)}${dd!==null?`<div class="t2">${dd} dia${dd===1?"":"s"} depois</div>`:""}</td>
       <td><span class="tag ${DV_CAT[k][1]}">${DV_CAT[k][0]}</span>${orig==="todas"&&r.logistica!=="fulfillment"?`<div class="t2">${r.logistica==="proprio"||r.logistica&&r.logistica!=="desconhecida"?"venda do estoque próprio":"origem não identificada"}</div>`:""}</td>
       <td class="dvsit">${esc(dvSituacao(r))}</td>
       <td>${(f=>f[1]?`<span class="tag ${f[1]}">${f[0]}</span>`:`<span class="t2">${f[0]}</span>`)(dvFav(r))}</td>
       <td class="r num">${n0(+r.qtd)}</td><td class="r num">${BRL(+r.valor)}</td>
+      <td class="r num">${(v=>v==null?`<span class="t2">—</span>`:`<span class="${v>0?"dv-neg":""}" title="Tarifa de devolução ${BRL(+r.tarifa_dev||0)} · tarifas da venda cobradas ${BRL(+r.tarifas_cobr||0)} · estornadas ${BRL(+r.tarifas_est||0)}">${BRL(v)}</span>${+r.tarifa_dev>0?`<div class="t2">etiqueta ${BRL(+r.tarifa_dev)}</div>`:""}`)(dvCusto(r))}</td>
       <td class="r"><span class="dvchev" aria-hidden="true">${aberto?"▴":"▾"}</span></td></tr>
-      ${aberto?`<tr class="dvdet"><td colspan="10">${dvCard(r)}</td></tr>`:""}`; }).join("");
+      ${aberto?`<tr class="dvdet"><td colspan="11">${dvCard(r)}</td></tr>`:""}`; }).join("");
   return hdr+`
     <div class="sumrow dvk">
       ${card(n0(todos.length),"pedidos devolvidos",`${n0(unDev)} un · últimos ${dias} dias`)}
@@ -142,15 +149,18 @@ function gDevol(){
       ${card(n0(cnt("nao").length),"entregas não concluídas",`${n0(un(cnt("nao")))} un voltaram ao Full`,"dv-k-nao")}
       ${card(BRL(reemb),"reembolsado ao comprador",`${n0(cnt("and").length)} em andamento`)}
       ${card(`${n0(favC)} × ${n0(favL)}`,"favorecido: comprador × loja",`${n0(todos.length-favC-favL)} sem favorecido definido`)}
+      ${card(n0(repL.length),"afetaram a reputação",repL.length?`${n0(repL.filter(r=>r.claim_status!=="closed").length)} ainda em aberto`:"nenhuma no período",repL.length?"dv-k-rep":"")}
+      ${card(BRL(tarTot),"tarifa de devolução cobrada",`${n0(tarL.length)} pedido${tarL.length===1?"":"s"} · ${BRL(naoEst)} em tarifas da venda não estornadas`,tarTot>0?"dv-k-rep":"")}
     </div>
+    ${semFat?`<div class="lmsg">Consultando o faturamento do Mercado Livre de ${n0(semFat)} pedido${semFat>1?"s":""} (tarifa de devolução e estornos). Os valores aparecem conforme a sincronização avança.</div>`:""}
     ${semClass?`<div class="lmsg">Identificando a origem de ${n0(semClass)} devolução${semClass>1?"ões":""} (Full ou estoque próprio). ${orig==="full"?"Elas aparecem neste filtro assim que forem identificadas.":""}</div>`:""}
     <div class="panel"><div class="fbar"><div class="seg" role="group" aria-label="Origem da venda">${[["full","Vendas do Full"],["todas","Todas as vendas"]].map(([k,t])=>`<button aria-pressed="${orig===k}" data-act="dv-orig" data-o="${k}">${t}</button>`).join("")}</div><div class="seg" role="group" aria-label="Período">${PER.map(([d,t])=>`<button aria-pressed="${dias===d}" data-act="dv-dias" data-d="${d}">${t}</button>`).join("")}</div></div>
       ${todos.length?dvGrafico(todos,dias):`<p class="muted">Nenhuma devolução nos últimos ${dias} dias.${c.dev_sync?"":" Clique em “Sincronizar devoluções” para buscar no Mercado Livre."}</p>`}</div>
     <div class="panel"><div class="phd"><h3>Vendas devolvidas</h3></div>
       <div class="fbar"><div class="busca2"><span aria-hidden="true">${LUPA}</span><input class="inp" id="dvQ" placeholder="Buscar pedido, produto ou SKU" value="${esc(DB.dvQ||"")}" autocomplete="off"></div>
-        <div class="seg" role="group" aria-label="Filtrar devoluções">${[["todas","Todas",todos.length],["full","Voltou ao Full",cnt("full").length],["loja","Nosso estoque",cnt("loja").length],["nao","Não entregues",cnt("nao").length],["and","Em andamento",cnt("and").length],["sem","Sem retorno",cnt("sem").length]].filter(([k,,n])=>k==="todas"||n).map(([k,t,n])=>`<button aria-pressed="${filtro===k}" data-act="dv-f" data-f="${k}">${t} <small>${n}</small></button>`).join("")}</div></div>
-      <div class="tbox"><table class="t dvt"><thead><tr><th>Pedido</th><th>Produto</th><th>Venda</th><th>Devolução</th><th>Destino</th><th>Situação</th><th>Favorecido</th><th class="r">Qtd</th><th class="r">Valor</th><th></th></tr></thead>
-      <tbody>${linhas||`<tr><td colspan="10" class="muted">Nenhuma devolução encontrada.</td></tr>`}</tbody></table></div>${P.html}
+        <div class="seg" role="group" aria-label="Filtrar devoluções">${[["todas","Todas",todos.length],["full","Voltou ao Full",cnt("full").length],["loja","Nosso estoque",cnt("loja").length],["nao","Não entregues",cnt("nao").length],["and","Em andamento",cnt("and").length],["sem","Sem retorno",cnt("sem").length],["rep","Afetam reputação",repL.length]].filter(([k,,n])=>k==="todas"||n).map(([k,t,n])=>`<button aria-pressed="${filtro===k}" data-act="dv-f" data-f="${k}">${t} <small>${n}</small></button>`).join("")}</div></div>
+      <div class="tbox"><table class="t dvt"><thead><tr><th>Pedido</th><th>Produto</th><th>Venda</th><th>Devolução</th><th>Destino</th><th>Situação</th><th>Favorecido</th><th class="r">Qtd</th><th class="r">Valor</th><th class="r" title="Tarifa de devolução + tarifas da venda não estornadas">Custo ML</th><th></th></tr></thead>
+      <tbody>${linhas||`<tr><td colspan="11" class="muted">Nenhuma devolução encontrada.</td></tr>`}</tbody></table></div>${P.html}
 </div>
     <div class="panel"><div class="phd"><h3>Disponível para retirada no Full</h3><span class="muted">${n0(ret.reduce((t,x)=>t+x.q,0))} peças</span></div>
       <p class="hint">Peças que estão no Full mas não podem ser vendidas. As marcadas como “retirar” vocês podem solicitar a retirada no Mercado Livre; as demais são informativas.</p>
@@ -163,7 +173,10 @@ function dvCard(r){
   const ev=dvEventos(r);
   const info=[["Pedido",r.order_id],["Reclamação",r.claim_id||"—"],["Destino",r.destino==="warehouse"?"Full":r.destino==="seller_address"?"Nosso estoque":"—"],
     ["Devolução",r.ret_status?(DV_RET[r.ret_status]||r.ret_status):"—"],["Resolução",r.resolucao?(DV_RES[r.resolucao]||r.resolucao):r.claim_status==="opened"?"Em andamento":"—"],
-    ["Dinheiro",r.status_money?(DV_MONEY[r.status_money]||r.status_money):"—"],["Favorecido",dvFav(r)[0]],["Revisão do Full",r.condicao?(DV_COND[r.condicao]||r.condicao):"—"]];
+    ["Dinheiro",r.status_money?(DV_MONEY[r.status_money]||r.status_money):"—"],["Favorecido",dvFav(r)[0]],["Revisão do Full",r.condicao?(DV_COND[r.condicao]||r.condicao):"—"],
+    ["Mediação",r.mediacao_id||"—"],["Reputação",r.reputacao==="affected"?"Afeta a reputação":r.reputacao==="not_affected"?"Não afeta":r.claim_id?"Consultando…":"—"],
+    ["Tarifa de devolução",r.fat_em?BRL(+r.tarifa_dev||0):"Consultando…"],["Tarifas da venda",r.fat_em?`${BRL(+r.tarifas_cobr||0)} cobradas · ${BRL(+r.tarifas_est||0)} estornadas`:"Consultando…"],
+    ["Custo ML líquido",(v=>v==null?"Consultando…":BRL(v))(dvCusto(r))]];
   return `<div class="dvcard"><dl class="dvinfo">${info.map(([a,b])=>`<div><dt>${a}</dt><dd>${esc(b)}</dd></div>`).join("")}</dl>
     <h4>Histórico do pedido</h4>
     ${ev.length?`<ol class="dvtl">${ev.map(e=>`<li class="${e.src}"><time>${dvHora(e.d)}</time><span>${esc(e.t)}</span></li>`).join("")}</ol>`:`<p class="muted">Sem eventos registrados para este pedido.</p>`}</div>`; }

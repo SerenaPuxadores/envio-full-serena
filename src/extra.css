@@ -248,3 +248,8 @@ body.comscan #toast{bottom:96px}
 .dvtl li{position:relative;display:grid;grid-template-columns:130px 1fr;gap:10px;font-size:13.5px}
 .dvtl li::before{content:"";position:absolute;left:-20px;top:5px;width:10px;height:10px;border-radius:50%;background:#164C64;border:2px solid #fff}
 .dvtl li.full::before{background:#8A6526}.dvtl time{color:var(--muted);font-variant-numeric:tabular-nums}
+
+.tag.dv-rep{background:#FBE3E0;color:#9B1C12;white-space:nowrap}
+.sum.dv-k-rep{box-shadow:inset 0 3px 0 #B4231A}.sum.dv-k-rep b{color:#9B1C12}
+.dv-neg{color:#9B1C12;font-weight:600}
+.dvt td.mono .tag{margin-top:3px;font-size:11px}

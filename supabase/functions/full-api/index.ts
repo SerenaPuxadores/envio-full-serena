@@ -194,25 +194,26 @@ async function devPedido(a: any, oid: string) {
   const node = it?.stock?.node_id || ""; const logistica = shp?.logistic_type || (node ? (/^BRP\d/.test(node) ? "proprio" : "fulfillment") : null);
   return { ord, it, ev, envio: shp?.status || null, logistica };
 }
-// custo do envio da devolução atribuído à loja (destinatário do envio de retorno), já descontadas as compensações do ML
-async function devFrete(a: any, sid: any) {
-  const c = await mlGet(a, `/shipments/${sid}/costs`).catch(nao429); await espera(250);
-  if (!c?.receiver) return null;
-  return Math.round(((+c.receiver.cost || 0) - (+c.receiver.compensation || 0)) * 100) / 100;
+const r2 = (x: number) => Math.round(x * 100) / 100;
+// eventos da reclamação/mediação (histórico de status + resolução)
+function claimEventos(hist: any, c: any) {
+  const ev: any[] = []; const add = (d: any, t: string, x = "") => { if (d) ev.push({ d: isoD(d), t, x: String(x ?? "") }); };
+  for (const h of Array.isArray(hist) ? hist : []) add(h.date, h.stage === "dispute" ? "mediacao" : "reclamacao", `${h.status}|${h.change_by || ""}`);
+  if (c.resolution?.date_created) add(c.resolution.date_created, "resolucao", `${c.resolution.reason || ""}|${(c.resolution.benefited || []).join(",")}`);
+  return ev;
 }
-async function devClaim(a: any, c: any) {
+async function devClaim(a: any, c: any, retPre?: any) {
   const oid = String(c.resource_id);
   const hist = await mlGet(a, `/post-purchase/v1/claims/${c.id}/status_history`).catch(nao429); await espera(250);
-  const ret = await mlGet(a, `/post-purchase/v2/claims/${c.id}/returns`).catch(nao429); await espera(250);
+  const ret = retPre !== undefined ? retPre : await mlGet(a, `/post-purchase/v2/claims/${c.id}/returns`).catch(nao429); if (retPre === undefined) await espera(250);
   const p = await devPedido(a, oid);
   const rs = (ret?.shipments || []).find((x: any) => x.type === "return") || ret?.shipments?.[0];
   const rsh = rs?.shipment_id ? await mlGet(a, `/shipments/${rs.shipment_id}`).catch(nao429) : null; if (rs?.shipment_id) await espera(250);
-  const frete = rs?.shipment_id ? await devFrete(a, rs.shipment_id) : null;
   let review: any = null;
   if (ret?.id && (ret.related_entities || []).includes("reviews")) { review = await mlGet(a, `/post-purchase/v1/returns/${ret.id}/reviews`).catch(nao429); await espera(250); }
   const destino = rs?.destination?.name || null;
   const ev = p.ev; const add = (d: any, t: string, x = "") => { if (d) ev.push({ d: isoD(d), t, x: String(x ?? "") }); };
-  for (const h of Array.isArray(hist) ? hist : []) add(h.date, h.stage === "dispute" ? "mediacao" : "reclamacao", `${h.status}|${h.change_by || ""}`);
+  ev.push(...claimEventos(hist, { resolution: null }));
   if (ret) add(ret.date_created, "retorno_criado", destino || "");
   const rh = rsh?.status_history || {};
   add(rh.date_shipped, "retorno_enviado", destino || ""); add(rh.date_delivered, "retorno_entregue", destino || ""); add(rh.date_not_delivered, "retorno_nao_entregue"); add(rh.date_cancelled, "retorno_cancelado");
@@ -226,45 +227,90 @@ async function devClaim(a: any, c: any) {
     ret_id: ret?.id ? String(ret.id) : null, ret_status: ret?.status || null, destino, status_money: ret?.status_money || null, ship_status: rsh?.status || rs?.status || null,
     venda_em: isoD(p.ord?.date_created), devol_em: isoD(c.date_created), fechado_em: isoD(ret?.date_closed || c.resolution?.date_created),
     item_id: p.it?.item?.id || null, titulo: p.it?.item?.title || null, sku: p.it?.item?.seller_sku || null, qtd, valor: Math.round((+p.it?.unit_price || 0) * qtd * 100) / 100,
-    logistica: p.logistica, frete_dev: frete, frete_ok: true, cobertura: c.resolution ? !!c.resolution.applied_coverage : null, eventos: ev, review: review ? { condicao: cond, raw: review } : null, raw: { claim: c, ret }, ml_updated: isoD(c.last_updated), updated_at: new Date().toISOString() };
+    logistica: p.logistica, frete_ok: true, cobertura: c.resolution ? !!c.resolution.applied_coverage : null, eventos: ev, review: review ? { condicao: cond, raw: review } : null, raw: { claim: c, ret }, ml_updated: isoD(c.last_updated), updated_at: new Date().toISOString() };
 }
+// faturamento do ML por pedido: tarifa de devolução cobrada da loja + tarifas da venda cobradas e estornadas
+async function devFaturamento(a: any, ids: string[]) {
+  const j = await mlGet(a, `/billing/integration/group/ML/order/details?order_ids=${ids.join(",")}&limit=250`);
+  const m = new Map<string, any>(ids.map((i) => [i, { tarifa_dev: 0, tarifas_cobr: 0, tarifas_est: 0 }]));
+  for (const r of j.results || []) for (const d of r.details || []) {
+    const ci = d.charge_info || {}; const oid = String(d.sales_info?.[0]?.order_id || r.order_id); const x = m.get(oid); if (!x) continue;
+    const v = +ci.detail_amount || 0; const dev = /devolu/i.test(ci.transaction_detail || "") || /^[CB]XDED$/.test(ci.detail_sub_type || "");
+    const bonus = ci.detail_type === "BONUS";
+    if (dev) x.tarifa_dev += bonus ? -v : v; else if (bonus) x.tarifas_est += v; else x.tarifas_cobr += v;
+  }
+  return [...m.entries()].map(([order_id, x]) => ({ order_id, tarifa_dev: r2(x.tarifa_dev), tarifas_cobr: r2(x.tarifas_cobr), tarifas_est: r2(x.tarifas_est) }));
+}
+const lim429 = (e: unknown) => e instanceof Erro && (e.s === 429 || /\b429\b/.test(e.message));
+const mesclaEv = (xs: any[]) => unico(xs.filter(Boolean), (e: any) => `${e.d}|${e.t}|${e.x}`).sort((p: any, q2: any) => String(p.d).localeCompare(String(q2.d)));
+
 async function devSync() {
-  const t0 = Date.now(); const a = await mlToken();
-  const desde = a.dev_ate ? new Date(new Date(a.dev_ate).getTime() - 60000).toISOString() : new Date(Date.now() - 150 * 86400000).toISOString();
-  let n = 0, ultimo = a.dev_ate || null, parcial = false;
+  const t0 = Date.now(); const a = await mlToken(); const D = 86400000;
+  const tempo = () => Date.now() - t0 > 95000;
+  const desde = a.dev_ate ? new Date(new Date(a.dev_ate).getTime() - 60000).toISOString() : new Date(Date.now() - 150 * D).toISOString();
+  const desdeMed = a.dev_med_ate ? new Date(new Date(a.dev_med_ate).getTime() - 60000).toISOString() : new Date(Date.now() - 150 * D).toISOString();
+  let n = 0, ultimo = a.dev_ate || null, ultimoMed = a.dev_med_ate || null, parcial = false;
   try {
+    // 1) reclamações de devolução
     fora: for (let off = 0; off < 3000; off += 50) {
       const j = await mlGet(a, `/post-purchase/v1/claims/search?player_role=respondent&player_user_id=${a.user_id}&type=returns&range=last_updated:after:${encodeURIComponent(desde)}&sort=last_updated:asc&limit=50&offset=${off}`);
       const cs = j.data || [];
       for (const c of cs) {
-        if (Date.now() - t0 > 90000) { parcial = true; break fora; }
-        if (c.fulfilled === true) { const row = await devClaim(a, c); await q(db.from("full_ml_devol").upsert(row)); n++; }
+        if (tempo()) { parcial = true; break fora; }
+        if (c.fulfilled === true) { const row = await devClaim(a, c); await q(db.from("full_ml_devol").upsert({ ...row, rep_ok: false, fat_em: null })); n++; }
         ultimo = c.last_updated;
       }
       if (cs.length < 50) break;
     }
-    // entregas não concluídas que voltaram ao Full e não têm reclamação de devolução
+    // 2) mediações (disputas): entram como devolução quando há retorno do produto; se o pedido já tem a devolução, completa com a decisão do mediador
+    if (!parcial) fora2: for (let off = 0; off < 3000; off += 50) {
+      const j = await mlGet(a, `/post-purchase/v1/claims/search?player_role=respondent&player_user_id=${a.user_id}&type=mediations&range=last_updated:after:${encodeURIComponent(desdeMed)}&sort=last_updated:asc&limit=50&offset=${off}`);
+      const cs = j.data || [];
+      for (const c of cs) {
+        if (tempo()) { parcial = true; break fora2; }
+        const oid = String(c.resource_id);
+        const ex = await q(db.from("full_ml_devol").select("order_id,claim_id,origem,eventos").eq("order_id", oid).maybeSingle());
+        if (ex && ex.claim_id && ex.claim_id !== String(c.id)) {
+          const hist = await mlGet(a, `/post-purchase/v1/claims/${c.id}/status_history`).catch(nao429); await espera(250);
+          const upd: any = { mediacao_id: String(c.id), eventos: mesclaEv([...(ex.eventos || []), ...claimEventos(hist, c)]), rep_ok: false, fat_em: null, updated_at: new Date().toISOString() };
+          if (c.status === "closed" && c.resolution) Object.assign(upd, { resolucao: c.resolution.reason || null, beneficiado: (c.resolution.benefited || []).join(",") || null, cobertura: !!c.resolution.applied_coverage });
+          await q(db.from("full_ml_devol").update(upd).eq("order_id", oid)); n++;
+        } else if (ex?.origem === "nao_entregue") {
+          // ignora: a entrega não concluída já está registrada
+        } else {
+          const ret = await mlGet(a, `/post-purchase/v2/claims/${c.id}/returns`).catch(nao429); await espera(250);
+          if (ret?.id) {
+            const row = await devClaim(a, c, ret);
+            row.eventos = mesclaEv([...row.eventos, ...claimEventos([], c)]);
+            await q(db.from("full_ml_devol").upsert({ ...row, origem: "mediacao", mediacao_id: String(c.id), rep_ok: false, fat_em: null })); n++;
+          }
+        }
+        ultimoMed = c.last_updated;
+      }
+      if (cs.length < 50) break;
+    }
+    // 3) entregas não concluídas que voltaram ao Full e não têm reclamação de devolução
     if (!parcial) {
-      const ops = await todas((x, y) => db.from("full_ml_ops").select("ref,data,inv,disp").eq("tipo", "sale_delivery_cancelation").gte("data", new Date(Date.now() - 150 * 86400000).toISOString()).order("data").range(x, y));
+      const ops = await todas((x, y) => db.from("full_ml_ops").select("ref,data,inv,disp").eq("tipo", "sale_delivery_cancelation").gte("data", new Date(Date.now() - 150 * D).toISOString()).order("data").range(x, y));
       const porPed = new Map<string, any>(); for (const o of ops) { const v = o.ref?.[0]?.value; if (v && !porPed.has(String(v))) porPed.set(String(v), o); }
       const ids = [...porPed.keys()];
       const ja = new Set<string>(); for (let i = 0; i < ids.length; i += 200) (await q(db.from("full_ml_devol").select("order_id").in("order_id", ids.slice(i, i + 200)))).forEach((r: any) => ja.add(r.order_id));
       for (const oid of ids.filter((x) => !ja.has(x))) {
-        if (Date.now() - t0 > 90000) { parcial = true; break; }
+        if (tempo()) { parcial = true; break; }
         const op = porPed.get(oid); const p = await devPedido(a, oid);
         const qtd = Math.max(1, +op.disp || 1);
         await q(db.from("full_ml_devol").upsert({ order_id: oid, claim_id: null, origem: "nao_entregue", claim_status: null, resolucao: null, beneficiado: null, ret_id: null, ret_status: "nao_entregue",
           destino: "warehouse", status_money: null, ship_status: p.envio, venda_em: isoD(p.ord?.date_created), devol_em: isoD(op.data), fechado_em: isoD(op.data),
           item_id: p.it?.item?.id || null, titulo: p.it?.item?.title || null, sku: p.it?.item?.seller_sku || null, qtd, valor: Math.round((+p.it?.unit_price || 0) * qtd * 100) / 100,
-          logistica: p.logistica || "fulfillment", frete_ok: true, eventos: p.ev, review: null, raw: { op, pedido: !!p.ord }, ml_updated: isoD(op.data), updated_at: new Date().toISOString() }));
+          logistica: p.logistica || "fulfillment", frete_ok: true, rep_ok: true, eventos: p.ev, review: null, raw: { op, pedido: !!p.ord }, ml_updated: isoD(op.data), updated_at: new Date().toISOString() }));
         n++;
       }
     }
-    // devoluções gravadas antes de guardar a logística: classifica se a venda saiu do Full
+    // 4) devoluções gravadas antes de guardar a logística: classifica se a venda saiu do Full
     if (!parcial) {
       const sem = await q(db.from("full_ml_devol").select("order_id").is("logistica", null).limit(60));
       for (const r of sem) {
-        if (Date.now() - t0 > 90000) { parcial = true; break; }
+        if (tempo()) { parcial = true; break; }
         const ord = await mlGet(a, `/orders/${r.order_id}`).catch(nao429); await espera(250);
         const sid = ord?.shipping?.id; const shp = sid ? await mlGet(a, `/shipments/${sid}`).catch(nao429) : null; if (sid) await espera(250);
         const node = ord?.order_items?.[0]?.stock?.node_id || "";
@@ -272,20 +318,44 @@ async function devSync() {
         await q(db.from("full_ml_devol").update({ logistica: lg }).eq("order_id", r.order_id)); n++;
       }
     }
-    // devoluções gravadas antes de guardar o frete: busca o custo do envio de retorno
+    // 5) se a reclamação/mediação afeta a reputação (reconsulta enquanto estiver aberta)
     if (!parcial) {
-      const sem = await q(db.from("full_ml_devol").select("order_id,raw->ret->shipments").eq("frete_ok", false).limit(80));
+      const sem = await q(db.from("full_ml_devol").select("order_id,claim_id,mediacao_id,claim_status").not("claim_id", "is", null).or("rep_ok.eq.false,claim_status.neq.closed").order("updated_at").limit(40));
       for (const r of sem) {
-        if (Date.now() - t0 > 90000) { parcial = true; break; }
-        const sh = (r.shipments || []).find((x: any) => x.type === "return") || (r.shipments || [])[0];
-        const fr = sh?.shipment_id ? await devFrete(a, sh.shipment_id) : null;
-        await q(db.from("full_ml_devol").update({ frete_dev: fr, frete_ok: true }).eq("order_id", r.order_id)); n++;
+        if (tempo()) { parcial = true; break; }
+        const vs: string[] = [];
+        for (const id of [r.claim_id, r.mediacao_id].filter(Boolean)) {
+          const j = await mlGet(a, `/post-purchase/v1/claims/${id}/affects-reputation`).catch(nao429); await espera(300);
+          if (j?.affects_reputation) vs.push(j.affects_reputation);
+        }
+        const rep = vs.includes("affected") ? "affected" : vs[0] || null;
+        await q(db.from("full_ml_devol").update({ reputacao: rep, rep_ok: r.claim_status === "closed" && !!rep }).eq("order_id", r.order_id)); n++;
+      }
+    }
+    // 6) faturamento: tarifa de devolução e tarifas estornadas (reconsulta por 60 dias após o fechamento; o ML lança a tarifa dias depois)
+    if (!parcial) {
+      const lim = new Date(Date.now() - 20 * 3600000).toISOString(), rec = new Date(Date.now() - 60 * D).toISOString();
+      const sem = (await q(db.from("full_ml_devol").select("order_id,fat_em,fechado_em").like("order_id", "2000%")
+        .or(`fat_em.is.null,and(fat_em.lt.${lim},or(fechado_em.is.null,fechado_em.gt.${rec}))`).order("fat_em", { ascending: true, nullsFirst: true }).limit(60))) as any[];
+      const grava = async (rows: any[]) => { for (const x of rows) await q(db.from("full_ml_devol").update({ ...x, fat_em: new Date().toISOString() }).eq("order_id", x.order_id)); n += rows.length; };
+      for (let i = 0; i < sem.length; i += 10) {
+        if (tempo()) { parcial = true; break; }
+        const ids = sem.slice(i, i + 10).map((r) => r.order_id);
+        try { await grava(await devFaturamento(a, ids)); }
+        catch (e) {
+          if (lim429(e)) { parcial = true; break; }
+          for (const id of ids) { await espera(1500);
+            try { await grava(await devFaturamento(a, [id])); }
+            catch (e2) { if (lim429(e2)) { parcial = true; break; } await q(db.from("full_ml_devol").update({ fat_em: new Date().toISOString() }).eq("order_id", id)); } }
+          if (parcial) break;
+        }
+        await espera(1500);
       }
     }
   } catch (e) {
-    if (e instanceof Erro && e.s === 429) parcial = true; else { await db.from("full_ml_auth").update({ dev_ate: ultimo, dev_msg: e instanceof Error ? e.message : String(e) }).eq("id", 1); throw e; }
+    if (lim429(e)) parcial = true; else { await db.from("full_ml_auth").update({ dev_ate: ultimo, dev_med_ate: ultimoMed, dev_msg: e instanceof Error ? e.message : String(e) }).eq("id", 1); throw e; }
   }
-  await q(db.from("full_ml_auth").update({ dev_ate: ultimo, dev_sync: new Date().toISOString(), dev_msg: null }).eq("id", 1));
+  await q(db.from("full_ml_auth").update({ dev_ate: ultimo, dev_med_ate: ultimoMed, dev_sync: new Date().toISOString(), dev_msg: null }).eq("id", 1));
   return { devolucoes: n, parcial };
 }
 
@@ -467,7 +537,7 @@ Deno.serve(async (req) => {
         const dias = Math.min(365, Math.max(1, +b.dias || 30));
         const desde = new Date(Date.now() - dias * 86400000).toISOString();
         const [a, rows, est, res] = await Promise.all([
-          mlAuth(), todas((x, y) => db.from("full_ml_devol").select("order_id,claim_id,origem,claim_status,resolucao,beneficiado,ret_status,destino,status_money,ship_status,venda_em,devol_em,fechado_em,item_id,titulo,sku,qtd,valor,logistica,frete_dev,cobertura,eventos,review->condicao").gte("devol_em", desde).order("devol_em", { ascending: false }).range(x, y)),
+          mlAuth(), todas((x, y) => db.from("full_ml_devol").select("order_id,claim_id,origem,claim_status,resolucao,beneficiado,ret_status,destino,status_money,ship_status,venda_em,devol_em,fechado_em,item_id,titulo,sku,qtd,valor,logistica,cobertura,mediacao_id,reputacao,tarifa_dev,tarifas_cobr,tarifas_est,fat_em,eventos,review->condicao").gte("devol_em", desde).order("devol_em", { ascending: false }).range(x, y)),
           todas((x, y) => db.from("full_ml_estoque").select("inv,item_id,titulo,sku,total,disponivel,indisponivel,detalhe").gt("indisponivel", 0).order("inv").range(x, y)),
           q(db.rpc("full_ml_resumo_json", { p_desde: desde })),
         ]);
