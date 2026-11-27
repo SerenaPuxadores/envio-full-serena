@@ -39,7 +39,7 @@ async function iniciar(){ scanInit();
 }
 
 /* ---------- atualização automática (outras pessoas no mesmo envio) ---------- */
-function digitando(){ const a=document.activeElement; return a && (a.id==="fq"||a.id==="mlQ"||a.id==="vQ"||a.id==="dvQ"||a.id==="parcObs"||a.dataset?.vq!==undefined||a.tagName==="TEXTAREA"||(a.closest&&a.closest("#uForm"))||a.type==="date"||a.type==="number"); }
+function digitando(){ const a=document.activeElement; return a && (a.id==="fq"||a.id==="mlQ"||a.id==="vQ"||a.id==="dvQ"||a.id==="adsQ"||a.id==="parcObs"||a.dataset?.vq!==undefined||a.tagName==="TEXTAREA"||(a.closest&&a.closest("#uForm"))||a.type==="date"||a.type==="number"); }
 setInterval(async()=>{
   if(document.hidden||ocupado||PEND>0||!DB.carregado||(!PREF.token&&!DB.qr)||DB.mobile==="__x") return;
   try{ const mudou=await carregar(false); if(mudou&&!digitando()){ const a=document.activeElement, id=a?.id, val=a?.value; render(); if(id){ const n=document.getElementById(id); if(n){ n.focus(); if(val&&n.value!==undefined&&!n.value) n.value=val; } } } }catch(e){}
@@ -115,7 +115,12 @@ document.addEventListener("click",ev=>{
   const sep=(acaoNome,cod,extra={},msg="")=>api("sep",{envio:e.id,cod,acao:acaoNome,msg,...extra});
   switch(act){
     case "logout": camDesliga(); api("logout").catch(()=>{}); PREF.token=null; DB.me=null; DB.meObj=null; DB.carregado=false; DB.cur=null; DB.lbl=null; break;
-    case "tab": DB.tab=b.dataset.t; DB.uEdit=null; if(DB.tab==="estoque"&&DB.ml) mlCarregar(); if(DB.tab==="devolucoes"&&DB.dv) dvCarregar(); break;
+    case "tab": DB.tab=b.dataset.t; DB.uEdit=null; if(DB.tab==="estoque"&&DB.ml) mlCarregar(); if(DB.tab==="devolucoes"&&DB.dv) dvCarregar(); if(DB.tab==="ads"&&DB.ads) adsCarregar(); break;
+    case "ads-sync": adsCarregar(true); return;
+    case "ads-dias": DB.adsDias=+b.dataset.d; DB.pg.ads=1; DB.ads=null; break;
+    case "ads-lg": DB.adsLg=b.dataset.o; DB.pg.ads=1; break;
+    case "ads-ord": { const o=b.dataset.o; DB.adsDir=DB.adsOrd===o?-(DB.adsDir||-1):(o==="acos"||o==="tacos"?1:-1); DB.adsOrd=o; DB.pg.ads=1; break; }
+    case "ads-baixar": adsBaixar(); return;
     case "dv-sync": dvSincronizar(); return;
     case "dv-dias": DB.dvDias=+b.dataset.d; DB.pg.dv=1; DB.dvOpen=null; dvCarregar(); break;
     case "dv-orig": DB.dvOrig=b.dataset.o; DB.pg.dv=1; DB.dvOpen=null; break;
@@ -211,6 +216,7 @@ document.addEventListener("change",ev=>{ const t=ev.target;
   else if(t.id==="qrsel"){ DB.qrU=t.value; render(); }
   else if(t.id==="fCusto"){ lerCustos(t); }
   else if(t.id==="verTodos"){ DB.verTodos=t.checked; render(); }
+  else if(t.id==="adsCamp"){ DB.adsCamp=t.value; DB.pg.ads=1; render(); }
   else if(t.id==="mlOrd"){ DB.mlOrd=t.value; render(); }
   else if(t.id==="mlZer"){ DB.mlZer=t.checked; try{ localStorage.setItem("envio-full-zerados",t.checked?"1":"0"); }catch(e){} render(); }
   else if(t.id==="mlTeto"){ DB.mlTeto=+t.value; try{ localStorage.setItem("envio-full-teto",t.value); }catch(e){} render(); }
@@ -234,6 +240,7 @@ document.addEventListener("submit",ev=>{
 document.addEventListener("focusin",ev=>{ if(ev.target.dataset?.vq!==undefined){ ev.target.select(); comboBusca(ev.target); } });
 document.addEventListener("input",ev=>{ if(ev.target.dataset?.vq!==undefined) comboBusca(ev.target);
   if(ev.target.id==="parcObs"){ DB.parcObs=ev.target.value; const er=$("#parcErr"); if(er) er.hidden=true; return; }
+  if(ev.target.id==="adsQ"){ DB.adsQ=ev.target.value; DB.pg.ads=1; const pos=ev.target.selectionStart; render(); const n=$("#adsQ"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } return; }
   if(ev.target.id==="dvQ"){ DB.dvQ=ev.target.value; DB.pg.dv=1; const pos=ev.target.selectionStart; render(); const n=$("#dvQ"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } return; }
   if(ev.target.id==="vQ"){ DB.vq=ev.target.value; DB.vpg=1; const pos=ev.target.selectionStart; render(); const n=$("#vQ"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } return; }
   if(ev.target.id==="mlQ"){ DB.mlQ=ev.target.value; DB.pg.mla=1; DB.pg.mlm=1; const pos=ev.target.selectionStart; render(); const n=$("#mlQ"); if(n){ n.focus(); n.setSelectionRange(pos,pos); } return; }

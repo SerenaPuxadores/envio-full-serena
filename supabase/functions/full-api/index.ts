@@ -67,9 +67,9 @@ async function mlToken() {
     await db.from("full_ml_auth").update({ msg: "A conexão com o Mercado Livre expirou. Conecte de novo." }).eq("id", 1); throw e;
   }
 }
-async function mlGet(a: any, path: string) {
+async function mlGet(a: any, path: string, hdr: Record<string, string> = {}) {
   for (let t = 0; t < 4; t++) {
-    const r = await fetch(ML + path, { headers: { authorization: `Bearer ${a.access_token}`, accept: "application/json" } });
+    const r = await fetch(ML + path, { headers: { authorization: `Bearer ${a.access_token}`, accept: "application/json", ...hdr } });
     if (r.status === 429 || r.status >= 500) { await espera(2000 * 2 ** t); continue; }
     // ids das movimentações passam de 2^53: lê como texto para não perder precisão
     const txt = (await r.text()).replace(/"id"\s*:\s*(\d{16,})/g, '"id":"$1"');
@@ -366,6 +366,37 @@ async function devSync() {
   return { devolucoes: n, parcial: parcial || p2 };
 }
 
+// ===== Publicidade (Mercado Ads · Product Ads): investimento e receita por anúncio =====
+async function adsColeta(dias: number) {
+  const t0 = Date.now(); const a = await mlToken();
+  const adv = (await mlGet(a, `/advertising/advertisers?product_id=PADS`, { "api-version": "1" }))?.advertisers?.[0];
+  must(adv?.advertiser_id, "A conta do Mercado Livre não tem Product Ads ativo.", 400);
+  const site = adv.site_id || "MLB", base = `/advertising/${site}/advertisers/${adv.advertiser_id}/product_ads`, V2 = { "api-version": "2" };
+  // período em dias completos, até ontem (horário de Brasília)
+  const dia = (t: number) => new Date(t - 3 * 3600000).toISOString().slice(0, 10);
+  const ate = dia(Date.now() - 86400000), de = dia(Date.now() - dias * 86400000);
+  const camps: any[] = [];
+  for (let off = 0; off < 500; off += 50) { const j = await mlGet(a, `${base}/campaigns/search?limit=50&offset=${off}`, V2); camps.push(...(j.results || [])); if ((j.results || []).length < 50) break; }
+  const M = "clicks,prints,cost,direct_amount,indirect_amount,total_amount,units_quantity,direct_units_quantity,indirect_units_quantity,organic_units_amount,organic_units_quantity";
+  const ads: any[] = []; let total = 0, completo = true;
+  // ordenado pelo investimento: para quando os anúncios param de gastar e de vender por ads
+  fora: for (let off = 0; off < 5000; off += 100) {
+    if (Date.now() - t0 > 110000) { completo = false; break; }
+    const j = await mlGet(a, `${base}/ads/search?limit=100&offset=${off}&date_from=${de}&date_to=${ate}&metrics=${M}&sort_by=cost&sort_order=desc`, V2);
+    total = +j.paging?.total || 0; const rs = j.results || [];
+    for (const x of rs) {
+      const m = x.metrics || {};
+      if (!(+m.cost > 0) && !(+m.total_amount > 0)) break fora;
+      ads.push({ id: x.item_id, t: x.title, th: x.thumbnail, lk: x.permalink, st: x.status, lg: x.logistic_type, c: x.campaign_id ? String(x.campaign_id) : null, p: x.price,
+        m: { cli: +m.clicks || 0, imp: +m.prints || 0, inv: +m.cost || 0, rd: +m.direct_amount || 0, ri: +m.indirect_amount || 0, ra: +m.total_amount || 0,
+          ua: +m.units_quantity || 0, ud: +m.direct_units_quantity || 0, ro: +m.organic_units_amount || 0, uo: +m.organic_units_quantity || 0 } });
+    }
+    if (rs.length < 100) break;
+  }
+  return { de, ate, dias, anunciante: adv.advertiser_name || "", total, completo, em: new Date().toISOString(),
+    campanhas: camps.map((c: any) => ({ id: String(c.id), nome: c.name, st: c.status, alvo: c.acos_target != null ? +c.acos_target : null, orc: c.budget != null ? +c.budget : null, estr: c.strategy || null })), ads };
+}
+
 async function rev() {
   // inclui o Picking: cadastrar EAN ou local lá atualiza as telas daqui em poucos segundos
   const [a, b, c, d] = await Promise.all([
@@ -556,6 +587,16 @@ Deno.serve(async (req) => {
         let pedTotal: number | null = null;
         try { const t = await mlToken(); const j = await mlGet(t, `/orders/search?seller=${t.user_id}&order.date_created.from=${encodeURIComponent(desde.replace("Z", "-00:00"))}&limit=1`); pedTotal = +j?.paging?.total || 0; } catch { pedTotal = null; }
         return out({ dias, conectado: mlLigado(a), dev_sync: a?.dev_sync || null, dev_msg: a?.dev_msg || null, devolucoes: rows, ops, indisp: est, vendidas, pedFull, pedTotal });
+      }
+      case "ads_painel": {
+        must(gestor && !me.qrEnvio, "Só o gestor vê a análise de anúncios.");
+        const dias = [7, 15, 30, 60, 90].includes(+b.dias) ? +b.dias : 30;
+        const c = await q(db.from("full_ads_cache").select("dados,em").eq("dias", dias).maybeSingle());
+        // guarda por 2 horas; o Mercado Ads fecha as métricas do dia só no dia seguinte
+        if (c && !b.forca && Date.now() - new Date(c.em).getTime() < 2 * 3600000) return out(c.dados);
+        const d = await adsColeta(dias);
+        await q(db.from("full_ads_cache").upsert({ dias, dados: d, em: d.em }));
+        return out(d);
       }
       case "ml_desconectar": {
         must(gestor && !me.qrEnvio, "Só o gestor desconecta.");
