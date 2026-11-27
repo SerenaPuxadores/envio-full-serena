@@ -22,15 +22,20 @@ function adsLinhas(){
   l.sort((a,b)=>(val(a)-val(b))*dir||b.m.inv-a.m.inv);
   return l; }
 async function adsBaixar(){
-  try{ await xlsxPronto(); const c=DB.ads||{}, l=adsLinhas(), r2=v=>v===null?"":Math.round(v*100)/100;
+  try{ await xlsxPronto(); const c=DB.ads||{}, l=adsLinhas();
     if(!l.length){ toast("Nada para baixar"); return; }
-    const linhas=l.map(a=>({"Anúncio":a.id,"Título":a.t||"","Campanha":a.cp?.nome||"","ACOS alvo da campanha (%)":a.cp?.alvo??"","Logística":a.lg==="fulfillment"?"Full":a.lg||"","Status":a.st||"",
-      "Investido":r2(a.m.inv),"Receita com ads":r2(a.m.ra),"Receita ads direta":r2(a.m.rd),"Receita ads indireta":r2(a.m.ri),"Receita orgânica":r2(a.m.ro),"Receita total":r2(a.rt),
-      "ACOS (%)":r2(a.acos),"TACOS (%)":r2(a.tacos),"ROAS":r2(a.roas),"Impressões":a.m.imp,"Cliques":a.m.cli,"Unidades por ads":a.m.ua,"Unidades orgânicas":a.m.uo}));
-    const ws=XLSX.utils.json_to_sheet(linhas);
-    ws["!cols"]=Object.keys(linhas[0]).map(k=>({wch:Math.min(60,Math.max(k.length,...linhas.slice(0,200).map(r=>String(r[k]??"").length))+2)}));
+    /* mesmas colunas da tela, com o MLB à parte; valores numéricos com formato de moeda e de porcentagem */
+    const pc=v=>v===null?"":v/100, S=k=>l.reduce((t,a)=>t+a.m[k],0), inv=S("inv"), ra=S("ra"), rt=l.reduce((t,a)=>t+a.rt,0);
+    const cab=["MLB","Anúncio","Investido","Receita ads","Receita total","ACOS","TACOS","Cliques"];
+    const linhas=l.map(a=>[a.id,a.t||"",a.m.inv,a.m.ra,a.rt,a.m.ra>0?pc(a.acos):"",pc(a.tacos),a.m.cli]);
+    linhas.push(["Total da lista",`${l.length} anúncios`,inv,ra,rt,pc(adsPct(inv,ra)),pc(adsPct(inv,rt)),S("cli")]);
+    const ws=XLSX.utils.aoa_to_sheet([cab,...linhas]);
+    const fmt={2:'"R$" #,##0.00',3:'"R$" #,##0.00',4:'"R$" #,##0.00',5:"0.0%",6:"0.0%",7:"#,##0"};
+    for(let r=1;r<=linhas.length;r++) for(const [col,z] of Object.entries(fmt)){ const cel=ws[XLSX.utils.encode_cell({r,c:+col})]; if(cel&&cel.t==="n") cel.z=z; }
+    ws["!cols"]=[{wch:16},{wch:Math.min(70,Math.max(10,...l.slice(0,300).map(a=>(a.t||"").length))+2)},{wch:14},{wch:15},{wch:15},{wch:9},{wch:9},{wch:10}];
+    ws["!autofilter"]={ref:`A1:H${linhas.length}`};
     const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Anúncios");
-    XLSX.writeFile(wb,`ads-${c.de}-a-${c.ate}.xlsx`); toast(`Planilha baixada · ${n0(linhas.length)} anúncios`);
+    XLSX.writeFile(wb,`ads-${c.de}-a-${c.ate}.xlsx`); toast(`Planilha baixada · ${n0(l.length)} anúncios`);
   }catch(x){ toast(x.message); } }
 
 function gAds(){
