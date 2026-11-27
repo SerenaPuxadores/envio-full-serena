@@ -15,6 +15,7 @@ function adsLinhas(){
   let l=(c.ads||[]).map(a=>{ const m=a.m, rt=adsRT(m), cp=cm.get(a.c)||null;
     return {...a,cp,rt,acos:adsPct(m.inv,m.ra),tacos:adsPct(m.inv,rt),roas:m.inv>0?m.ra/m.inv:null}; });
   if(camp) l=l.filter(a=>a.c===camp);
+  if(DB.adsSemVenda) l=l.filter(a=>a.m.inv>0&&a.m.ra===0);
   if(lgF==="full") l=l.filter(a=>a.lg==="fulfillment"); else if(lgF==="prop") l=l.filter(a=>a.lg!=="fulfillment");
   if(qs) l=l.filter(a=>buscaAprox(qs,[a.id,a.t,a.cp?.nome||""].join(" ")));
   const ord=DB.adsOrd||"inv", dir=DB.adsDir||-1;
@@ -78,6 +79,7 @@ function gAds(){
       <div class="seg" role="group" aria-label="Logística">${[["todos","Todos"],["full","Full"],["prop","Estoque próprio"]].map(([k,t])=>`<button aria-pressed="${(DB.adsLg||"todos")===k}" data-act="ads-lg" data-o="${k}">${t}</button>`).join("")}</div>
       <select class="inp adsel" id="adsCamp" aria-label="Campanha"><option value="">Todas as campanhas</option>${camps.map(x=>`<option value="${esc(x.id)}" ${DB.adsCamp===x.id?"selected":""}>${esc(x.nome)}${x.st!=="active"?" (pausada)":""}</option>`).join("")}</select>
       <div class="busca2"><span aria-hidden="true">${LUPA}</span><input class="inp" id="adsQ" placeholder="Buscar anúncio ou MLB" value="${esc(DB.adsQ||"")}" autocomplete="off"></div>
+      <label class="adsflag"><input type="checkbox" id="adsSemVenda" ${DB.adsSemVenda?"checked":""}> Só sem vendas</label>
       <button class="mlxls" data-act="ads-baixar" title="Baixar planilha" aria-label="Baixar planilha da lista">${ICO_XLS}</button>
     </div>
     <details class="adsdef"><summary>Como os valores são calculados</summary><ul>
@@ -88,7 +90,7 @@ function gAds(){
       <li><b>TACOS</b> = investido ÷ receita total. Mostra quanto a publicidade pesa sobre tudo o que o anúncio vende.</li>
       <li>Período em dias completos, até ontem. Entram os anúncios que tiveram investimento ou venda por ads no período. O Mercado Livre limita a consulta a 90 dias.</li></ul></details>
     <div class="tbox"><table class="t adst"><thead><tr><th>Anúncio</th>${th("inv","Investido")}${th("ra","Receita ads")}${th("rt","Receita total")}${th("acos","ACOS")}${th("tacos","TACOS")}${th("cli","Cliques")}</tr></thead>
-      <tbody>${linhas||`<tr><td colspan="7" class="muted">Nenhum anúncio com investimento no período.</td></tr>`}</tbody>
+      <tbody>${linhas||`<tr><td colspan="7" class="muted">${DB.adsSemVenda?"Nenhum anúncio investiu sem vender neste período e filtro.":"Nenhum anúncio com investimento no período."}</td></tr>`}</tbody>
       ${l.length?`<tfoot><tr><td><b>Total da lista</b> <span class="t2">${n0(l.length)} anúncios</span></td><td class="r num"><b>${BRL(inv)}</b></td><td class="r num"><b>${BRL(ra)}</b></td><td class="r num"><b>${BRL(rt)}</b></td><td class="r num"><b>${adsFmtP(adsPct(inv,ra))}</b></td><td class="r num"><b>${adsFmtP(adsPct(inv,rt))}</b></td><td class="r num">${n0(S("cli"))}</td></tr></tfoot>`:""}
     </table></div>${P.html}</div>`;
 }

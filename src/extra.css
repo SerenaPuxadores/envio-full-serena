@@ -263,3 +263,5 @@ body.comscan #toast{bottom:96px}
 .ads-ok{color:#1D6B3A;font-weight:600}
 .adsel{width:auto;max-width:240px;flex:0 0 auto}
 .adsdef{margin:4px 0 12px;font-size:13px}.adsdef summary{cursor:pointer;color:var(--muted,#6b6b6b)}.adsdef ul{margin:8px 0 0;padding-left:18px;line-height:1.6}
+.adsflag{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;white-space:nowrap;cursor:pointer;padding:6px 10px;border:1px solid var(--line,#e4e0d8);border-radius:8px;background:#fff}
+.adsflag:has(input:checked){border-color:#B4231A;color:#9B1C12;background:#FBE3E0}.adsflag input{accent-color:#B4231A;margin:0}

@@ -216,6 +216,7 @@ document.addEventListener("change",ev=>{ const t=ev.target;
   else if(t.id==="qrsel"){ DB.qrU=t.value; render(); }
   else if(t.id==="fCusto"){ lerCustos(t); }
   else if(t.id==="verTodos"){ DB.verTodos=t.checked; render(); }
+  else if(t.id==="adsSemVenda"){ DB.adsSemVenda=t.checked; DB.pg.ads=1; render(); }
   else if(t.id==="adsCamp"){ DB.adsCamp=t.value; DB.pg.ads=1; render(); }
   else if(t.id==="mlOrd"){ DB.mlOrd=t.value; render(); }
   else if(t.id==="mlZer"){ DB.mlZer=t.checked; try{ localStorage.setItem("envio-full-zerados",t.checked?"1":"0"); }catch(e){} render(); }
